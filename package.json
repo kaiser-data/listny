@@ -1,0 +1,22 @@
+{
+  "name": "listny",
+  "version": "0.1.0",
+  "description": "Voice dictation for any app: press a hotkey, speak, and the text is pasted where your cursor is.",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "build": "vite build",
+    "start": "vite build && electron .",
+    "check": "node --check electron/main.cjs && node --check electron/preload.cjs && node --check electron/settings.cjs && node --check electron/transcribe.cjs && node --check electron/paste.cjs && vite build"
+  },
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^45.1.0",
+    "vite": "^8.3.5"
+  }
+}
