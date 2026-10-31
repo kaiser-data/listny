@@ -56,7 +56,12 @@ function KeyField({ provider, label, isSet, onSaved }) {
 }
 
 function Settings({ settings, setSettings }) {
-  const [recordingHotkey, setRecordingHotkey] = useState(false);
+  const [recordingHotkey, setRecordingHotkeyState] = useState(false);
+  // Pause the global shortcut while capturing, otherwise pressing it here would start a dictation.
+  const setRecordingHotkey = (on) => {
+    setRecordingHotkeyState(on);
+    window.listny.captureHotkey(on);
+  };
   const save = async (patch) => setSettings(await window.listny.saveSettings(patch));
   const stt = settings.stt.provider;
   const cp = settings.cleanup.provider;
@@ -139,6 +144,20 @@ function Settings({ settings, setSettings }) {
       </section>
 
       <section>
+        <h2>While dictating</h2>
+        <label className="toggle">
+          <input type="checkbox" checked={settings.muteWhileDictating} onChange={(e) => save({ muteWhileDictating: e.target.checked })} />
+          Mute music and videos while I talk, turn sound back on when I stop
+        </label>
+        {settings.canLaunchAtLogin && (
+          <label className="toggle">
+            <input type="checkbox" checked={settings.launchAtLogin} onChange={(e) => save({ launchAtLogin: e.target.checked })} />
+            Start Listny when I log in
+          </label>
+        )}
+      </section>
+
+      <section>
         <h2>API keys</h2>
         <p className="muted">Stored encrypted in your macOS keychain. Audio goes straight from this Mac to the provider you pick.</p>
         {STT_PROVIDERS.map((p) => (
@@ -152,6 +171,11 @@ function Settings({ settings, setSettings }) {
 function History() {
   const [items, setItems] = useState([]);
   const [copied, setCopied] = useState(null);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(null), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
   const load = () => window.listny.getHistory().then(setItems);
   useEffect(() => {
     load();
@@ -210,6 +234,8 @@ function Hub() {
       setSettings(s);
       if (!Object.values(s.hasKey).some(Boolean)) setTab('settings');
     });
+    // Keep in sync with toggles flipped from the menu bar.
+    return window.listny.onSettingsChanged(() => window.listny.getSettings().then(setSettings));
   }, []);
   if (!settings) return null;
 

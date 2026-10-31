@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vite build",
     "start": "vite build && electron .",
-    "check": "node --check electron/main.cjs && node --check electron/preload.cjs && node --check electron/settings.cjs && node --check electron/transcribe.cjs && node --check electron/paste.cjs && vite build"
+    "check": "node --check electron/main.cjs && node --check electron/preload.cjs && node --check electron/settings.cjs && node --check electron/transcribe.cjs && node --check electron/paste.cjs && node --check electron/audio.cjs && vite build"
   },
   "license": "ISC",
   "type": "commonjs",

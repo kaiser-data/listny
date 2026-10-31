@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('listny', {
   // hub
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (patch) => ipcRenderer.invoke('settings:save', patch),
+  onSettingsChanged: on('settings:changed'),
+  captureHotkey: (capturing) => ipcRenderer.send('hotkey:capture', capturing),
   setKey: (provider, value) => ipcRenderer.invoke('key:set', { provider, value }),
   getHistory: () => ipcRenderer.invoke('history:get'),
   clearHistory: () => ipcRenderer.invoke('history:clear'),

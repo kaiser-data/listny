@@ -31,9 +31,18 @@ input { font: inherit; }
   color: var(--text);
   transition: min-width 0.2s ease;
 }
-.pill--recording { min-width: 168px; box-shadow: 0 0 0 1px rgba(255, 90, 78, 0.35); }
+.pill--recording {
+  min-width: 220px;
+  grid-auto-flow: column;
+  gap: 12px;
+  box-shadow: 0 0 0 1px rgba(255, 90, 78, 0.35);
+}
+.pill-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.rec-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); animation: pulse 1.4s infinite ease-in-out; }
+.pill-meta kbd { font: 10px ui-monospace, 'SF Mono', monospace; padding: 1px 4px; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 4px; }
 .bars { display: flex; align-items: center; gap: 3px; height: 22px; }
 .bars span {
+  transform: scaleY(0.12);
   width: 3px;
   height: 22px;
   border-radius: 2px;

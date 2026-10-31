@@ -15,15 +15,17 @@ const path = require('node:path');
 const settings = require('./settings.cjs');
 const { transcribe, cleanup } = require('./transcribe.cjs');
 const { insertText } = require('./paste.cjs');
+const { muteSystemAudio, restoreSystemAudio, restoreSystemAudioSync } = require('./audio.cjs');
 
 const DIST = path.join(__dirname, '..', 'dist');
-const PILL_SIZE = { width: 240, height: 64 };
+const PILL_SIZE = { width: 260, height: 64 };
 
 let pill = null;
 let hub = null;
 let tray = null;
 let state = 'idle'; // idle | recording | processing
 let hotkeyError = '';
+let hotkeyPaused = false; // while the hub captures a new shortcut, the old one must not fire
 
 function createPill() {
   pill = new BrowserWindow({
@@ -69,6 +71,12 @@ function openHub() {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   });
   hub.loadFile(path.join(DIST, 'hub.html'));
+  hub.on('closed', () => {
+    if (!hotkeyPaused) return;
+    hotkeyPaused = false; // window closed mid-capture: bring the shortcut back
+    registerHotkey();
+  });
+  app.focus({ steal: true });
 }
 
 function notify(body) {
@@ -78,6 +86,10 @@ function notify(body) {
 function setState(next) {
   state = next;
   updateTray();
+  // Music and videos go quiet while you talk and come back the moment you stop (or cancel).
+  if (next === 'recording') {
+    if (settings.load().muteWhileDictating) muteSystemAudio();
+  } else restoreSystemAudio();
   // Esc cancels only while a dictation is active, so it isn't swallowed system-wide.
   if (next === 'recording') globalShortcut.register('Escape', cancelRecording);
   else if (globalShortcut.isRegistered('Escape')) globalShortcut.unregister('Escape');
@@ -103,6 +115,7 @@ function cancelRecording() {
 
 function registerHotkey() {
   globalShortcut.unregisterAll();
+  if (hotkeyPaused) return;
   const { hotkey } = settings.load();
   hotkeyError = '';
   try {
@@ -147,6 +160,7 @@ async function processAudio(_event, { audio, mimeType, durationMs }) {
       raw,
       text,
       provider,
+      result,
       durationMs,
       latencyMs: Date.now() - started,
     });
@@ -161,6 +175,20 @@ async function processAudio(_event, { audio, mimeType, durationMs }) {
   }
 }
 
+function applyLoginItem() {
+  // Only a packaged app can register itself; in dev it would register the bare Electron binary.
+  if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: Boolean(settings.load().launchAtLogin) });
+}
+
+function saveSettings(patch) {
+  settings.save(patch);
+  registerHotkey();
+  applyLoginItem();
+  hub?.webContents.send('settings:changed');
+}
+
+const hubSettings = () => ({ ...settings.publicSettings(), hotkeyError, canLaunchAtLogin: app.isPackaged });
+
 function trayIcon() {
   // 16x16 template microphone glyph, so the menu bar tints it for light/dark mode.
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5" fill="black"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5" stroke="black" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>`;
@@ -171,7 +199,7 @@ function trayIcon() {
 
 function updateTray() {
   if (!tray) return;
-  const { hotkey } = settings.load();
+  const { hotkey, muteWhileDictating } = settings.load();
   const last = settings.history()[0];
   tray.setToolTip(state === 'recording' ? 'Listny — listening' : 'Listny');
   tray.setContextMenu(
@@ -179,6 +207,12 @@ function updateTray() {
       { label: hotkeyError || `Press ${hotkey} to dictate`, enabled: false },
       { label: state === 'recording' ? 'Stop dictation' : 'Start dictation', click: toggleRecording, enabled: state !== 'processing' },
       { label: 'Copy last transcript', enabled: Boolean(last), click: () => last && clipboard.writeText(last.text) },
+      {
+        label: 'Mute audio while dictating',
+        type: 'checkbox',
+        checked: muteWhileDictating,
+        click: (item) => saveSettings({ muteWhileDictating: item.checked }),
+      },
       { type: 'separator' },
       { label: 'Open Listny…', click: openHub },
       { type: 'separator' },
@@ -197,15 +231,18 @@ ipcMain.on('rec:discard', () => {
   setState('idle');
   pill.hide();
 });
-ipcMain.handle('settings:get', () => ({ ...settings.publicSettings(), hotkeyError }));
+ipcMain.handle('settings:get', hubSettings);
 ipcMain.handle('settings:save', (_e, patch) => {
-  settings.save(patch);
+  saveSettings(patch);
+  return hubSettings();
+});
+ipcMain.on('hotkey:capture', (_e, capturing) => {
+  hotkeyPaused = Boolean(capturing);
   registerHotkey();
-  return { ...settings.publicSettings(), hotkeyError };
 });
 ipcMain.handle('key:set', (_e, { provider, value }) => {
   settings.setKey(provider, value.trim());
-  return settings.publicSettings();
+  return hubSettings();
 });
 ipcMain.handle('history:get', () => settings.history());
 ipcMain.handle('history:clear', () => {
@@ -215,14 +252,19 @@ ipcMain.handle('history:clear', () => {
 ipcMain.handle('clipboard:write', (_e, text) => clipboard.writeText(text));
 
 app.whenReady().then(async () => {
+  // Menu-bar only: no Dock icon, so dictating never activates the app or pops a window.
+  if (process.platform === 'darwin') app.dock.hide();
   if (process.platform === 'darwin') await systemPreferences.askForMediaAccess('microphone');
   createPill();
   tray = new Tray(trayIcon());
   registerHotkey();
+  applyLoginItem();
   const firstRun = !Object.values(settings.publicSettings().hasKey).some(Boolean);
   if (firstRun) openHub();
 });
 
-app.on('activate', openHub);
 app.on('window-all-closed', () => {}); // stay alive in the menu bar
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+  restoreSystemAudioSync(); // never leave the Mac muted
+});

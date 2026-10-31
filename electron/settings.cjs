@@ -23,6 +23,8 @@ const DEFAULTS = {
   },
   pasteIntoActiveApp: true,
   restoreClipboard: true,
+  muteWhileDictating: true,
+  launchAtLogin: false,
 };
 
 const PROVIDERS = ['openai', 'groq', 'elevenlabs'];
@@ -43,6 +45,18 @@ function writeJson(p, data) {
   fs.writeFileSync(p, JSON.stringify(data, null, 2), { mode: 0o600 });
 }
 
+// Listny is the only writer of these files, so keep them in memory instead of
+// re-reading from disk on every hotkey press and tray refresh.
+const cache = new Map();
+function read(p, fallback) {
+  if (!cache.has(p)) cache.set(p, readJson(p, fallback));
+  return cache.get(p);
+}
+function write(p, data) {
+  writeJson(p, data);
+  cache.set(p, data);
+}
+
 function merge(base, over) {
   const out = { ...base };
   for (const [k, v] of Object.entries(over || {})) {
@@ -52,7 +66,7 @@ function merge(base, over) {
 }
 
 function load() {
-  const raw = readJson(file(), {});
+  const raw = read(file(), {});
   return { ...merge(DEFAULTS, raw), keys: raw.keys || {} };
 }
 
@@ -69,11 +83,11 @@ function getKey(provider) {
 
 function setKey(provider, value) {
   if (!PROVIDERS.includes(provider)) throw new Error(`Unknown provider: ${provider}`);
-  const raw = readJson(file(), {});
-  raw.keys = raw.keys || {};
-  if (value) raw.keys[provider] = safeStorage.encryptString(value).toString('base64');
-  else delete raw.keys[provider];
-  writeJson(file(), raw);
+  const raw = read(file(), {});
+  const keys = { ...raw.keys };
+  if (value) keys[provider] = safeStorage.encryptString(value).toString('base64');
+  else delete keys[provider];
+  write(file(), { ...raw, keys });
 }
 
 // The shape a renderer sees: settings without key material, plus which keys are set.
@@ -83,21 +97,21 @@ function publicSettings() {
 }
 
 function save(patch) {
-  const raw = readJson(file(), {});
-  const { keys, hasKey, ...clean } = patch;
-  writeJson(file(), { ...merge(raw, clean), keys: raw.keys || {} });
+  const raw = read(file(), {});
+  const { keys, hasKey, hotkeyError, canLaunchAtLogin, ...clean } = patch;
+  write(file(), { ...merge(raw, clean), keys: raw.keys || {} });
 }
 
 function history() {
-  return readJson(historyFile(), []);
+  return read(historyFile(), []);
 }
 
 function addHistory(entry) {
-  writeJson(historyFile(), [entry, ...history()].slice(0, 200));
+  write(historyFile(), [entry, ...history()].slice(0, 200));
 }
 
 function clearHistory() {
-  writeJson(historyFile(), []);
+  write(historyFile(), []);
 }
 
 module.exports = { load, save, getKey, setKey, publicSettings, history, addHistory, clearHistory, PROVIDERS };

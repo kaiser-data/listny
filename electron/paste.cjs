@@ -1,8 +1,6 @@
 const { clipboard, systemPreferences } = require('electron');
 const { execFile } = require('node:child_process');
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 function sendPasteKeystroke() {
   if (process.platform === 'darwin') {
     return new Promise((resolve, reject) =>
@@ -44,8 +42,10 @@ async function insertText(text, { paste = true, restoreClipboard = true } = {}) 
     return 'copied';
   }
   if (restoreClipboard) {
-    await sleep(500);
-    if (clipboard.readText() === text) clipboard.writeText(previous);
+    // Give the target app time to read the clipboard, but don't hold up the result for it.
+    setTimeout(() => {
+      if (clipboard.readText() === text) clipboard.writeText(previous);
+    }, 500);
   }
   return 'pasted';
 }

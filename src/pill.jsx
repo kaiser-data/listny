@@ -2,15 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
-const BARS = 18;
+const BARS = 14;
 const MIN_DURATION_MS = 300;
 const MIME = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
 
 function Pill() {
   const [phase, setPhase] = useState('idle'); // idle | recording | processing | done | error
-  const [levels, setLevels] = useState(() => Array(BARS).fill(0));
   const [message, setMessage] = useState('');
+  const [seconds, setSeconds] = useState(0);
   const session = useRef(null);
+  // The level meter is written straight to the DOM: re-rendering React 60×/s just to move bars is wasted work.
+  const bars = useRef([]);
 
   useEffect(() => {
     async function start() {
@@ -18,11 +20,14 @@ function Pill() {
       session.current = s;
       setPhase('recording');
       setMessage('');
+      setSeconds(0);
+      s.timer = setInterval(() => setSeconds(Math.floor((Date.now() - s.startedAt) / 1000)), 1000);
       try {
         s.stream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         });
       } catch (err) {
+        clearInterval(s.timer);
         setPhase('idle');
         window.listny.recordingFailed(err.message);
         return;
@@ -34,7 +39,9 @@ function Pill() {
       const buf = new Uint8Array(analyser.frequencyBinCount);
       const tick = () => {
         analyser.getByteFrequencyData(buf);
-        setLevels(Array.from({ length: BARS }, (_, i) => buf[i + 1] / 255));
+        bars.current.forEach((el, i) => {
+          if (el) el.style.transform = `scaleY(${0.12 + (buf[i + 1] / 255) * 0.88})`;
+        });
         s.raf = requestAnimationFrame(tick);
       };
       tick();
@@ -48,9 +55,9 @@ function Pill() {
 
     function release(s) {
       cancelAnimationFrame(s.raf);
+      clearInterval(s.timer);
       s.stream?.getTracks().forEach((t) => t.stop());
       s.audioCtx?.close();
-      setLevels(Array(BARS).fill(0));
     }
 
     async function finish(s) {
@@ -82,7 +89,10 @@ function Pill() {
       s.cancelled = cancel;
       s.stopRequested = true;
       if (s.recorder?.state === 'recording') s.recorder.stop();
-      else if (cancel) setPhase('idle');
+      else if (cancel) {
+        clearInterval(s.timer);
+        setPhase('idle');
+      }
     }
 
     const offs = [window.listny.onStart(start), window.listny.onStop(() => stop(false)), window.listny.onCancel(() => stop(true))];
@@ -92,11 +102,18 @@ function Pill() {
   return (
     <div className={`pill pill--${phase}`}>
       {phase === 'recording' && (
-        <div className="bars" aria-label="Listening">
-          {levels.map((l, i) => (
-            <span key={i} style={{ transform: `scaleY(${0.12 + l * 0.88})` }} />
-          ))}
-        </div>
+        <>
+          <div className="bars" aria-label="Listening">
+            {Array.from({ length: BARS }, (_, i) => (
+              <span key={i} ref={(el) => (bars.current[i] = el)} />
+            ))}
+          </div>
+          <div className="pill-meta">
+            <span className="rec-dot" />
+            {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}
+            <kbd>esc</kbd>
+          </div>
+        </>
       )}
       {phase === 'processing' && (
         <div className="dots" aria-label="Transcribing">
