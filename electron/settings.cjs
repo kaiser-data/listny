@@ -31,6 +31,7 @@ const PROVIDERS = ['openai', 'groq', 'elevenlabs'];
 
 const file = () => path.join(app.getPath('userData'), 'settings.json');
 const historyFile = () => path.join(app.getPath('userData'), 'history.json');
+const recordingsDir = () => path.join(app.getPath('userData'), 'recordings');
 
 function readJson(p, fallback) {
   try {
@@ -109,11 +110,44 @@ function history() {
 }
 
 function addHistory(entry) {
-  write(historyFile(), [entry, ...history()].slice(0, 200));
+  const all = [entry, ...history()];
+  for (const old of all.slice(200)) if (old.audioFile) deleteRecording(old.audioFile);
+  write(historyFile(), all.slice(0, 200));
+}
+
+function updateHistory(id, patch) {
+  write(historyFile(), history().map((h) => (h.id === id ? { ...h, ...patch } : h)));
 }
 
 function clearHistory() {
   write(historyFile(), []);
+  fs.rmSync(recordingsDir(), { recursive: true, force: true });
 }
 
-module.exports = { load, save, getKey, setKey, publicSettings, history, addHistory, clearHistory, PROVIDERS };
+// Audio of failed dictations, kept so they can be retried instead of lost.
+function saveRecording(id, audio, mimeType) {
+  const ext = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+  const name = `${id}.${ext}`;
+  fs.mkdirSync(recordingsDir(), { recursive: true });
+  fs.writeFileSync(path.join(recordingsDir(), name), audio, { mode: 0o600 });
+  return name;
+}
+
+const readRecording = (name) => fs.readFileSync(path.join(recordingsDir(), path.basename(name)));
+const deleteRecording = (name) => fs.rmSync(path.join(recordingsDir(), path.basename(name)), { force: true });
+
+module.exports = {
+  load,
+  save,
+  getKey,
+  setKey,
+  publicSettings,
+  history,
+  addHistory,
+  updateHistory,
+  clearHistory,
+  saveRecording,
+  readRecording,
+  deleteRecording,
+  PROVIDERS,
+};

@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('listny', {
   setKey: (provider, value) => ipcRenderer.invoke('key:set', { provider, value }),
   getHistory: () => ipcRenderer.invoke('history:get'),
   clearHistory: () => ipcRenderer.invoke('history:clear'),
+  retry: (id) => ipcRenderer.invoke('history:retry', id),
   copy: (text) => ipcRenderer.invoke('clipboard:write', text),
   onHistoryChanged: on('history:changed'),
 });

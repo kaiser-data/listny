@@ -171,6 +171,7 @@ function Settings({ settings, setSettings }) {
 function History() {
   const [items, setItems] = useState([]);
   const [copied, setCopied] = useState(null);
+  const [retrying, setRetrying] = useState(null);
   useEffect(() => {
     if (!copied) return;
     const t = setTimeout(() => setCopied(null), 1500);
@@ -204,20 +205,40 @@ function History() {
       <ul>
         {items.map((i) => (
           <li key={i.id}>
-            <p>{i.text}</p>
+            {i.text && <p>{i.text}</p>}
+            {i.error && (
+              <p className="error">
+                {i.text ? '' : 'Failed: '}
+                {i.error}
+              </p>
+            )}
             <div className="meta">
               <span>{new Date(i.at).toLocaleString()}</span>
               <span>{i.provider}</span>
-              <span>{(i.latencyMs / 1000).toFixed(1)}s</span>
-              <button
-                className="ghost"
-                onClick={() => {
-                  window.listny.copy(i.text);
-                  setCopied(i.id);
-                }}
-              >
-                {copied === i.id ? 'Copied' : 'Copy'}
-              </button>
+              {i.latencyMs != null && <span>{(i.latencyMs / 1000).toFixed(1)}s</span>}
+              {i.audioFile && (
+                <button
+                  disabled={retrying === i.id}
+                  onClick={async () => {
+                    setRetrying(i.id);
+                    await window.listny.retry(i.id);
+                    setRetrying(null);
+                  }}
+                >
+                  {retrying === i.id ? 'Transcribing…' : 'Retry'}
+                </button>
+              )}
+              {i.text && (
+                <button
+                  className="ghost"
+                  onClick={() => {
+                    window.listny.copy(i.text);
+                    setCopied(i.id);
+                  }}
+                >
+                  {copied === i.id ? 'Copied' : 'Copy'}
+                </button>
+              )}
             </div>
           </li>
         ))}

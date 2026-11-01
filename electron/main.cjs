@@ -129,33 +129,39 @@ function registerHotkey() {
   updateTray();
 }
 
+// Speech-to-text plus optional cleanup, shared by live dictation and retries of saved recordings.
+async function toText(audio, mimeType) {
+  const cfg = settings.load();
+  const provider = cfg.stt.provider;
+  const raw = await transcribe({
+    provider,
+    model: cfg.stt.models[provider],
+    apiKey: settings.getKey(provider),
+    audio,
+    mimeType,
+    language: cfg.language,
+  });
+  if (!raw || !cfg.cleanup.enabled) return { provider, raw, text: raw };
+  const cp = cfg.cleanup.provider;
+  const text = await cleanup({ provider: cp, model: cfg.cleanup.models[cp], apiKey: settings.getKey(cp), text: raw });
+  return { provider, raw, text };
+}
+
 async function processAudio(_event, { audio, mimeType, durationMs }) {
   const cfg = settings.load();
   const started = Date.now();
+  const id = started.toString(36);
+  const buf = Buffer.from(audio);
   try {
-    const provider = cfg.stt.provider;
-    const raw = await transcribe({
-      provider,
-      model: cfg.stt.models[provider],
-      apiKey: settings.getKey(provider),
-      audio: Buffer.from(audio),
-      mimeType,
-      language: cfg.language,
-    });
+    const { provider, raw, text } = await toText(buf, mimeType);
     if (!raw) return { status: 'empty' };
-
-    let text = raw;
-    if (cfg.cleanup.enabled) {
-      const cp = cfg.cleanup.provider;
-      text = await cleanup({ provider: cp, model: cfg.cleanup.models[cp], apiKey: settings.getKey(cp), text: raw });
-    }
 
     const result = await insertText(text, { paste: cfg.pasteIntoActiveApp, restoreClipboard: cfg.restoreClipboard });
     if (result === 'copied' && cfg.pasteIntoActiveApp) {
       notify('Copied to clipboard. Allow Listny under Privacy & Security → Accessibility to paste automatically.');
     }
     settings.addHistory({
-      id: started.toString(36),
+      id,
       at: new Date(started).toISOString(),
       raw,
       text,
@@ -167,12 +173,42 @@ async function processAudio(_event, { audio, mimeType, durationMs }) {
     hub?.webContents.send('history:changed');
     return { status: result, text };
   } catch (err) {
-    notify(err.message);
+    settings.addHistory({
+      id,
+      at: new Date(started).toISOString(),
+      raw: '',
+      text: '',
+      provider: cfg.stt.provider,
+      result: 'failed',
+      error: err.message,
+      audioFile: settings.saveRecording(id, buf, mimeType),
+      mimeType,
+      durationMs,
+    });
+    hub?.webContents.send('history:changed');
+    notify(`${err.message}\nRecording saved — retry it from the Listny history.`);
     return { status: 'error', error: err.message };
   } finally {
     setState('idle');
     setTimeout(() => state === 'idle' && pill.hide(), 900);
   }
+}
+
+// Re-transcribes a saved recording with the current settings and copies the result.
+async function retryRecording(_event, id) {
+  const entry = settings.history().find((h) => h.id === id);
+  if (!entry?.audioFile) return;
+  try {
+    const { provider, raw, text } = await toText(settings.readRecording(entry.audioFile), entry.mimeType);
+    if (!raw) throw new Error('No speech found in this recording.');
+    clipboard.writeText(text);
+    settings.updateHistory(id, { provider, raw, text, result: 'copied', error: undefined, audioFile: undefined });
+    settings.deleteRecording(entry.audioFile);
+  } catch (err) {
+    settings.updateHistory(id, { error: err.message });
+  }
+  updateTray();
+  hub?.webContents.send('history:changed');
 }
 
 function applyLoginItem() {
@@ -206,7 +242,7 @@ function updateTray() {
     Menu.buildFromTemplate([
       { label: hotkeyError || `Press ${hotkey} to dictate`, enabled: false },
       { label: state === 'recording' ? 'Stop dictation' : 'Start dictation', click: toggleRecording, enabled: state !== 'processing' },
-      { label: 'Copy last transcript', enabled: Boolean(last), click: () => last && clipboard.writeText(last.text) },
+      { label: 'Copy last transcript', enabled: Boolean(last?.text), click: () => last?.text && clipboard.writeText(last.text) },
       {
         label: 'Mute audio while dictating',
         type: 'checkbox',
@@ -245,6 +281,7 @@ ipcMain.handle('key:set', (_e, { provider, value }) => {
   return hubSettings();
 });
 ipcMain.handle('history:get', () => settings.history());
+ipcMain.handle('history:retry', retryRecording);
 ipcMain.handle('history:clear', () => {
   settings.clearHistory();
   updateTray();
