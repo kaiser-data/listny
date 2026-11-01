@@ -251,7 +251,13 @@ ipcMain.handle('history:clear', () => {
 });
 ipcMain.handle('clipboard:write', (_e, text) => clipboard.writeText(text));
 
+// One Listny at a time: a second launch (e.g. the .app while `npm start` runs) just opens settings.
+const isPrimary = app.requestSingleInstanceLock();
+if (!isPrimary) app.quit();
+app.on('second-instance', () => openHub());
+
 app.whenReady().then(async () => {
+  if (!isPrimary) return;
   // Menu-bar only: no Dock icon, so dictating never activates the app or pops a window.
   if (process.platform === 'darwin') app.dock.hide();
   if (process.platform === 'darwin') await systemPreferences.askForMediaAccess('microphone');

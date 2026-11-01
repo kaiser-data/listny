@@ -90,10 +90,12 @@ function setKey(provider, value) {
   write(file(), { ...raw, keys });
 }
 
-// The shape a renderer sees: settings without key material, plus which keys are set.
+// The shape a renderer sees: settings without key material, plus which keys are usable.
+// A key counts only if it decrypts, so one saved by another build (different keychain
+// entry) shows as missing instead of failing later with a confusing auth error.
 function publicSettings() {
   const { keys, ...rest } = load();
-  return { ...rest, hasKey: Object.fromEntries(PROVIDERS.map((p) => [p, Boolean(keys[p])])) };
+  return { ...rest, hasKey: Object.fromEntries(PROVIDERS.map((p) => [p, Boolean(getKey(p))])) };
 }
 
 function save(patch) {

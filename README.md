@@ -19,6 +19,14 @@ npm install
 npm start
 ```
 
+### Build the app
+
+```bash
+npm run dist
+```
+
+This writes `release/Listny-<version>-arm64.dmg` (and a `.zip`). Drag **Listny.app** into Applications. It runs as a menu-bar app with no Dock icon. The build is signed with the `mac-dictate local signing` certificate when the keychain allows it (override with `LISTNY_SIGN_IDENTITY`), otherwise ad-hoc. With an ad-hoc signature, macOS may ask for Microphone and Accessibility permission again after each rebuild. It isn't notarized, so to share it, recipients right-click → Open the first time.
+
 On first launch the settings window opens. Add an API key for at least one provider. Listny then lives in the menu bar.
 
 - **Alt+Space** (configurable): start or stop dictating
