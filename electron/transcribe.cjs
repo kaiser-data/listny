@@ -31,7 +31,9 @@ async function post(url, init, label, timeoutMs) {
 
 async function failure(res, label) {
   const body = await res.text().catch(() => '');
-  return new Error(`${label} failed (${res.status}): ${body.slice(0, 300)}`);
+  const err = new Error(`${label} failed (${res.status}): ${body.slice(0, 300)}`);
+  err.status = res.status;
+  return err;
 }
 
 async function transcribe({ provider, model, apiKey, audio, mimeType, language }) {

@@ -130,13 +130,33 @@ function registerHotkey() {
 }
 
 // Speech-to-text plus optional cleanup, shared by live dictation and retries of saved recordings.
+// Statuses that mean "this account can't be used right now" (bad key, out of credits, rate limited),
+// where trying the provider's other key can still succeed.
+const KEY_FAILURES = new Set([401, 402, 403, 429]);
+
+async function transcribeWithKeys(provider, request) {
+  const ordered = settings.getKeys(provider); // the key that worked last comes first
+  if (!ordered.length) return transcribe({ ...request, provider, apiKey: '' }); // throws the "no key" message
+  let firstError;
+  for (const { slot, key } of ordered) {
+    try {
+      const raw = await transcribe({ ...request, provider, apiKey: key });
+      settings.preferKey(provider, slot); // persisted, so the next session starts on this key
+      return raw;
+    } catch (err) {
+      firstError ||= err;
+      if (!KEY_FAILURES.has(err.status)) throw err;
+    }
+  }
+  if (ordered.length > 1) firstError.message = `Both ${provider} keys failed. ${firstError.message}`;
+  throw firstError;
+}
+
 async function toText(audio, mimeType) {
   const cfg = settings.load();
   const provider = cfg.stt.provider;
-  const raw = await transcribe({
-    provider,
+  const raw = await transcribeWithKeys(provider, {
     model: cfg.stt.models[provider],
-    apiKey: settings.getKey(provider),
     audio,
     mimeType,
     language: cfg.language,
@@ -289,6 +309,19 @@ ipcMain.handle('history:clear', () => {
 ipcMain.handle('clipboard:write', (_e, text) => clipboard.writeText(text));
 
 // One Listny at a time: a second launch (e.g. the .app while `npm start` runs) just opens settings.
+// Setup without the settings window: launching with LISTNY_KEY_<SLOT> set (e.g. LISTNY_KEY_ELEVENLABS,
+// LISTNY_KEY_ELEVENLABS_BACKUP) stores those keys in the keychain-encrypted settings and exits.
+function importKeysFromEnv() {
+  let imported = 0;
+  for (const slot of settings.KEY_SLOTS) {
+    const value = (process.env[`LISTNY_KEY_${slot.replace(':', '_').toUpperCase()}`] || '').trim();
+    if (!value) continue;
+    settings.setKey(slot, value);
+    imported += 1;
+  }
+  return imported;
+}
+
 const isPrimary = app.requestSingleInstanceLock();
 if (!isPrimary) app.quit();
 app.on('second-instance', () => openHub());
@@ -297,6 +330,7 @@ app.whenReady().then(async () => {
   if (!isPrimary) return;
   // Menu-bar only: no Dock icon, so dictating never activates the app or pops a window.
   if (process.platform === 'darwin') app.dock.hide();
+  if (importKeysFromEnv()) return app.quit();
   if (process.platform === 'darwin') await systemPreferences.askForMediaAccess('microphone');
   createPill();
   tray = new Tray(trayIcon());

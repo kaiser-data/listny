@@ -35,9 +35,15 @@ function Segmented({ options, value, onChange }) {
 
 function KeyField({ provider, label, isSet, onSaved }) {
   const [value, setValue] = useState('');
+  const [error, setError] = useState('');
   const save = async (v) => {
-    onSaved(await window.listny.setKey(provider, v));
-    setValue('');
+    setError('');
+    try {
+      onSaved(await window.listny.setKey(provider, v));
+      setValue('');
+    } catch (err) {
+      setError(err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''));
+    }
   };
   return (
     <div className="key-row">
@@ -51,6 +57,7 @@ function KeyField({ provider, label, isSet, onSaved }) {
           Remove
         </button>
       )}
+      {error && <p className="error key-error">{error}</p>}
     </div>
   );
 }
@@ -160,9 +167,16 @@ function Settings({ settings, setSettings }) {
       <section>
         <h2>API keys</h2>
         <p className="muted">Stored encrypted in your macOS keychain. Audio goes straight from this Mac to the provider you pick.</p>
-        {STT_PROVIDERS.map((p) => (
-          <KeyField key={p.id} provider={p.id} label={p.label} isSet={settings.hasKey[p.id]} onSaved={(s) => setSettings({ ...settings, ...s })} />
-        ))}
+        {STT_PROVIDERS.flatMap((p) => {
+          const onSaved = (s) => setSettings({ ...settings, ...s });
+          const backup = `${p.id}:backup`;
+          const rows = [<KeyField key={p.id} provider={p.id} label={p.label} isSet={settings.keySlots[p.id]} onSaved={onSaved} />];
+          // A second account for the same provider, used when the first is out of credits.
+          if (settings.keySlots[p.id] || settings.keySlots[backup]) {
+            rows.push(<KeyField key={backup} provider={backup} label={`${p.label} backup`} isSet={settings.keySlots[backup]} onSaved={onSaved} />);
+          }
+          return rows;
+        })}
       </section>
     </div>
   );

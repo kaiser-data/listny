@@ -96,7 +96,7 @@ input:focus-visible, button:focus-visible { outline: 2px solid #6b8afd; outline-
 }
 .hotkey.listening { border-color: #6b8afd; color: var(--muted); }
 
-.key-row { display: grid; grid-template-columns: 90px 1fr auto auto; gap: 8px; align-items: center; margin-top: 8px; }
+.key-row { display: grid; grid-template-columns: 130px 1fr auto auto; gap: 8px; align-items: center; margin-top: 8px; }
 .key-row button, .history-head button, .meta button {
   background: var(--line);
   border: 0;
@@ -104,6 +104,7 @@ input:focus-visible, button:focus-visible { outline: 2px solid #6b8afd; outline-
   padding: 7px 12px;
 }
 .key-row button:disabled { opacity: 0.4; cursor: default; }
+.key-row .key-error { grid-column: 1 / -1; margin: 0; }
 button.ghost { background: none; color: var(--muted); }
 button.ghost:hover { color: var(--text); }
 

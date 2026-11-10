@@ -28,6 +28,10 @@ const DEFAULTS = {
 };
 
 const PROVIDERS = ['openai', 'groq', 'elevenlabs'];
+// Each provider has a main key and an optional backup key (e.g. a second account),
+// used when the main one is out of credits or rejected.
+const backupSlot = (provider) => `${provider}:backup`;
+const KEY_SLOTS = PROVIDERS.flatMap((p) => [p, backupSlot(p)]);
 
 const file = () => path.join(app.getPath('userData'), 'settings.json');
 const historyFile = () => path.join(app.getPath('userData'), 'history.json');
@@ -72,8 +76,8 @@ function load() {
 }
 
 // API keys are encrypted with the OS keychain via safeStorage and never sent to a renderer.
-function getKey(provider) {
-  const enc = load().keys[provider];
+function readSlot(slot) {
+  const enc = load().keys[slot];
   if (!enc) return '';
   try {
     return safeStorage.decryptString(Buffer.from(enc, 'base64'));
@@ -82,12 +86,35 @@ function getKey(provider) {
   }
 }
 
-function setKey(provider, value) {
-  if (!PROVIDERS.includes(provider)) throw new Error(`Unknown provider: ${provider}`);
+// All usable keys for a provider as { slot, key }. The slot that worked last comes first and is
+// remembered in settings.json, so a restart doesn't go back to an account that is out of credits.
+function getKeys(provider) {
+  const preferred = load().preferredKey?.[provider];
+  return [provider, backupSlot(provider)]
+    .sort((a, b) => (b === preferred) - (a === preferred))
+    .map((slot) => ({ slot, key: readSlot(slot) }))
+    .filter((k) => k.key);
+}
+const getKey = (provider) => getKeys(provider)[0]?.key || '';
+
+function preferKey(provider, slot) {
+  if (load().preferredKey?.[provider] === slot) return;
+  const raw = read(file(), {});
+  write(file(), { ...raw, preferredKey: { ...raw.preferredKey, [provider]: slot } });
+}
+
+function setKey(slot, value) {
+  if (!KEY_SLOTS.includes(slot)) throw new Error(`Unknown key slot: ${slot}`);
   const raw = read(file(), {});
   const keys = { ...raw.keys };
-  if (value) keys[provider] = safeStorage.encryptString(value).toString('base64');
-  else delete keys[provider];
+  if (value) {
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('The macOS keychain is not available, so the key could not be saved.');
+    try {
+      keys[slot] = safeStorage.encryptString(value).toString('base64');
+    } catch (err) {
+      throw new Error(`The key could not be saved to the macOS keychain: ${err.message}`);
+    }
+  } else delete keys[slot];
   write(file(), { ...raw, keys });
 }
 
@@ -96,12 +123,16 @@ function setKey(provider, value) {
 // entry) shows as missing instead of failing later with a confusing auth error.
 function publicSettings() {
   const { keys, ...rest } = load();
-  return { ...rest, hasKey: Object.fromEntries(PROVIDERS.map((p) => [p, Boolean(getKey(p))])) };
+  return {
+    ...rest,
+    hasKey: Object.fromEntries(PROVIDERS.map((p) => [p, Boolean(getKey(p))])),
+    keySlots: Object.fromEntries(KEY_SLOTS.map((s) => [s, Boolean(readSlot(s))])),
+  };
 }
 
 function save(patch) {
   const raw = read(file(), {});
-  const { keys, hasKey, hotkeyError, canLaunchAtLogin, ...clean } = patch;
+  const { keys, hasKey, keySlots, preferredKey, hotkeyError, canLaunchAtLogin, ...clean } = patch;
   write(file(), { ...merge(raw, clean), keys: raw.keys || {} });
 }
 
@@ -140,6 +171,8 @@ module.exports = {
   load,
   save,
   getKey,
+  getKeys,
+  preferKey,
   setKey,
   publicSettings,
   history,
@@ -150,4 +183,5 @@ module.exports = {
   readRecording,
   deleteRecording,
   PROVIDERS,
+  KEY_SLOTS,
 };
