@@ -60,6 +60,30 @@ async function transcribe({ provider, model, apiKey, audio, mimeType, language }
   return (data.text || '').trim();
 }
 
+// Statuses that mean "this account can't be used right now" (bad key, out of credits, rate limited),
+// where trying the provider's other key can still succeed.
+const KEY_FAILURES = new Set([401, 402, 403, 429]);
+
+// Tries each { slot, key } in order and moves on to the next only when the provider rejected the account.
+// Any other failure (bad audio, timeout, server error) is thrown at once: another key would not help.
+async function transcribeWithKeys(keys, request, { onKeyFailed = () => {}, onKeyWorked = () => {} } = {}) {
+  if (!keys.length) return transcribe({ ...request, apiKey: '' }); // throws the "no key" message
+  let firstError;
+  for (const { slot, key } of keys) {
+    try {
+      const raw = await transcribe({ ...request, apiKey: key });
+      onKeyWorked(slot);
+      return raw;
+    } catch (err) {
+      firstError ||= err;
+      onKeyFailed(slot, err);
+      if (!KEY_FAILURES.has(err.status)) throw err;
+    }
+  }
+  if (keys.length > 1) firstError.message = `Both ${request.provider} keys failed. ${firstError.message}`;
+  throw firstError;
+}
+
 async function cleanup({ provider, model, apiKey, text }) {
   if (!apiKey) throw new Error(`No API key set for ${provider} (cleanup).`);
   const body = JSON.stringify({
@@ -75,4 +99,4 @@ async function cleanup({ provider, model, apiKey, text }) {
   return (data.choices?.[0]?.message?.content || text).trim();
 }
 
-module.exports = { transcribe, cleanup };
+module.exports = { transcribe, transcribeWithKeys, cleanup };

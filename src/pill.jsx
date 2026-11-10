@@ -96,6 +96,7 @@ function Pill() {
     }
 
     const offs = [window.listny.onStart(start), window.listny.onStop(() => stop(false)), window.listny.onCancel(() => stop(true))];
+    window.listny.pillReady(); // listeners are attached: the main process may send 'rec:start' now
     return () => offs.forEach((off) => off());
   }, []);
 

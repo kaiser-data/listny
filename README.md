@@ -1,52 +1,154 @@
-# Listny
+<div align="center">
 
-Voice dictation for any app, in the style of Wispr Flow. Press a hotkey, speak, press it again, and the transcript is pasted where your cursor is.
+<img src="docs/img/banner.svg" alt="Listny: press a hotkey, speak, and it is typed where your cursor is" width="820">
 
-Built with Electron + React. Speech-to-text runs on the cloud provider you choose:
+### Talk instead of typing, in any app on your Mac
 
-| Provider   | Default model            |
-| ---------- | ------------------------ |
-| OpenAI     | `gpt-4o-mini-transcribe` |
-| Groq       | `whisper-large-v3-turbo` |
-| ElevenLabs | `scribe_v1`              |
+**Press a hotkey, speak, press it again. The text is pasted where your cursor is.**<br>
+**Open source, no subscription: you plug in your own speech-to-text key.**
 
-An optional **AI cleanup** pass (OpenAI or Groq chat model) removes filler words, applies spoken self-corrections ("at 3, no, at 4") and fixes punctuation.
+[![Download for macOS](https://img.shields.io/badge/Download-macOS%20DMG-ff5a4e?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/kaiser-data/listny/releases/latest)
 
-## Run
+[![CI](https://github.com/kaiser-data/listny/actions/workflows/ci.yml/badge.svg)](https://github.com/kaiser-data/listny/actions/workflows/ci.yml)
+![tests](https://img.shields.io/badge/tests-10%20passing-3fb950)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey?logo=apple)
+![Speech to text](https://img.shields.io/badge/speech--to--text-OpenAI%20%C2%B7%20Groq%20%C2%B7%20ElevenLabs-8a8f98)
 
-```bash
-npm install
-npm start
-```
+</div>
 
-### Build the app
+> **Try it in two minutes**
+> 1. Download the DMG from the [latest release](https://github.com/kaiser-data/listny/releases/latest) (`arm64` for Apple Silicon, `x64` for Intel) and drag **Listny** into Applications.
+> 2. Listny is not notarized by Apple yet, so the first start needs one extra step: run `xattr -dr com.apple.quarantine /Applications/Listny.app` in Terminal, then open the app.
+> 3. Paste an API key from OpenAI, Groq or ElevenLabs into the settings window that opens. Groq and ElevenLabs have free plans.
+> 4. Click into any text field, press **Option+Space**, speak, press **Option+Space** again.
 
-```bash
-npm run dist
-```
+<img src="docs/img/how-it-works.svg" alt="Press Option+Space, speak while the recording pill shows a level meter and a timer, press again, and the sentence appears in the text field you were in" width="100%">
 
-This writes `release/Listny-<version>-arm64.dmg` (and a `.zip`). Drag **Listny.app** into Applications. It runs as a menu-bar app with no Dock icon. The build is signed with the `mac-dictate local signing` certificate when the keychain allows it (override with `LISTNY_SIGN_IDENTITY`), otherwise ad-hoc. With an ad-hoc signature, macOS may ask for Microphone and Accessibility permission again after each rebuild. It isn't notarized, so to share it, recipients right-click → Open the first time.
+## The idea
 
-On first launch the settings window opens. Add an API key for at least one provider. Listny then lives in the menu bar.
+Speaking is several times faster than typing, and modern speech-to-text is good enough to trust with real messages. The polished dictation apps are subscriptions, and your voice goes through their servers.
 
-- **Alt+Space** (configurable): start or stop dictating
-- **Esc**: cancel while recording
-- Music and videos are **muted while you talk** and come back the moment you stop or cancel. Toggle it in Settings or the menu-bar menu. If sound was already off, Listny leaves it off.
-- To paste automatically, macOS needs **Accessibility** permission (System Settings → Privacy & Security → Accessibility). Without it, the text is copied to the clipboard instead.
+Listny is the small, inspectable version: a menu-bar app that records while you talk, sends the audio **straight from your Mac to the provider you chose**, and pastes the result. You pay the provider for what you use, which for everyday dictation is often nothing.
 
-## How it works
+| | Subscription dictation app | Listny |
+| --- | --- | --- |
+| Cost | Monthly fee | Free app. You pay your speech-to-text provider, often within its free plan |
+| Where audio goes | The vendor's servers | Directly to OpenAI, Groq or ElevenLabs, with your own key |
+| Out of credits | Upgrade the plan | Add a backup key; Listny switches to it automatically |
+| Source | Closed | MIT-licensed, about 1,300 lines you can read |
+| Failed dictation | Usually gone | Audio is kept and can be retried from the history |
 
-- `electron/main.cjs`: tray, global hotkey, recording-pill window (a non-activating panel, so focus stays in your app), and the pipeline: transcribe → clean up → paste → save to history
-- `electron/transcribe.cjs`: provider calls (OpenAI, Groq, ElevenLabs) and the cleanup prompt
-- `electron/paste.cjs`: puts the text on the clipboard, sends ⌘V, then restores your previous clipboard
-- `electron/audio.cjs`: mutes system output during dictation (`osascript` on macOS, `pactl` on Linux) and restores only what it muted, including on quit
-- `electron/settings.cjs`: settings and history saved as JSON in `userData`; API keys encrypted with `safeStorage`
-- `src/pill.jsx`: records the mic as WebM/Opus and shows a live level meter
-- `src/hub.jsx`: history and settings
+## What it does
+
+- **Dictate anywhere.** A global hotkey (default **Option+Space**, configurable) starts and stops recording. **Esc** cancels.
+- **Stays out of the way.** No Dock icon and no window: a small pill at the bottom of the screen shows a level meter and a timer, and the app you are typing in keeps the focus.
+- **Three providers.** Pick the one you like, and change the model name in settings.
+
+  | Provider | Default model |
+  | --- | --- |
+  | OpenAI | `gpt-4o-mini-transcribe` |
+  | Groq | `whisper-large-v3-turbo` |
+  | ElevenLabs | `scribe_v1` |
+
+- **Backup key.** Add a second key per provider, for example a second account. When the first is out of credits or rejected, the same dictation is retried with the backup, and Listny remembers which key worked.
+- **Optional AI cleanup.** An OpenAI or Groq chat model removes filler words, applies spoken corrections (*"at 3, no wait, at 4"*) and fixes punctuation.
+- **Quiet while you talk.** Music and videos are muted during a dictation and come back when you stop. If sound was already off, Listny leaves it off.
+- **Nothing gets lost.** Every dictation is in the history. If transcription fails, the audio is saved and can be retried.
+- **Any language** your provider supports. Leave the language field empty to auto-detect, or set a code such as `de`.
+
+## Permissions
+
+macOS asks for two permissions on first use:
+
+| Permission | Why |
+| --- | --- |
+| **Microphone** | To record while you dictate. |
+| **Accessibility** | To press ⌘V for you. Without it, the text is copied to the clipboard and you paste it yourself. |
+
+## Privacy
+
+- **Audio** goes from your Mac to the provider you picked, over HTTPS, and nowhere else. There is no Listny server.
+- **API keys** are encrypted with the macOS keychain (Electron `safeStorage`) and never leave the main process.
+- **History** (your transcripts) is stored as plain JSON on your Mac in `~/Library/Application Support/listny/`, readable only by your user. Clear it in the history tab.
+- **Failed recordings** are kept in the same folder until you retry or clear them.
+- **No telemetry**, analytics or update checks.
+- **The log** at `~/Library/Logs/listny/main.log` records hotkey presses, state changes and errors. It never contains dictated text or keys.
+
+## What it costs
+
+The app is free. Speech-to-text is billed by your provider, at its current prices.
+
+One measured data point: ElevenLabs charged about 1.1 credits per second of audio in our use, so the 10,000 credits of its free plan covered roughly 150 minutes of speech a month.
 
 ## Limitations
 
-- The hotkey toggles recording on and off. Electron's `globalShortcut` can't detect key release, so there's no hold-to-talk yet.
-- Audio is uploaded after you stop. There's no streaming transcription.
-- Muting while dictating isn't implemented on Windows yet.
-- "Start at login" appears only in a packaged build.
+- **macOS only.** There is code for Windows and Linux paste and mute, but it is untested and no builds are published.
+- **Not notarized.** The app is signed ad hoc, so macOS needs the `xattr` step above, and it may ask for Microphone and Accessibility permission again after an update.
+- **The Intel build is untested.** It is built by CI; development happens on Apple Silicon.
+- **Toggle, not hold-to-talk.** Electron's global shortcuts cannot see a key release.
+- **No streaming.** Audio is uploaded when you stop, so text appears a second or two later.
+- **Cloud only.** There is no on-device model yet.
+
+## Stack
+
+| Layer | Tech | Why |
+| --- | --- | --- |
+| Shell | Electron 45 | One codebase for tray, global hotkey, microphone and a non-activating overlay window |
+| UI | React 19 + Vite | Two tiny pages: the recording pill and the settings/history window |
+| Speech-to-text | OpenAI, Groq, ElevenLabs HTTP APIs | No SDKs: three `fetch` calls with a deadline |
+| Paste | CoreGraphics key event via `osascript` (JXA) | Works without a native module; falls back to System Events |
+| Secrets | Electron `safeStorage` | Keys are encrypted with the macOS keychain |
+| Packaging | electron-builder | DMG and zip for Apple Silicon and Intel |
+
+There are no runtime dependencies; everything in `package.json` is a build tool.
+
+## Repo layout
+
+```
+electron/
+  main.cjs        tray, hotkey, recording pill window, the dictation pipeline, log
+  transcribe.cjs  provider calls, backup-key fallback, cleanup prompt
+  paste.cjs       clipboard + ⌘V, then restores the previous clipboard
+  audio.cjs       mutes system output during dictation and restores it
+  settings.cjs    settings, history, saved recordings, encrypted keys
+  preload.cjs     the narrow bridge between windows and the main process
+src/
+  pill.jsx        records the microphone (WebM/Opus) and draws the level meter
+  hub.jsx         history and settings
+test/             unit tests for the transcription module
+build/            app icon and the code-signing hook
+packaging/        Homebrew cask template
+docs/             images and the release guide
+```
+
+## Run it from source
+
+```bash
+git clone https://github.com/kaiser-data/listny.git
+cd listny
+npm install
+npm start          # builds the UI and starts the app
+
+npm test           # 10 unit tests
+npm run check      # syntax check, tests and UI build
+npm run dist       # writes release/Listny-<version>-arm64.dmg and .zip
+```
+
+Requires Node 22 or later and macOS 13 or later.
+
+`npm run dist` signs the app with the certificate named in `LISTNY_SIGN_IDENTITY` if your keychain has it, otherwise ad hoc. A stable certificate keeps the Microphone and Accessibility permissions across rebuilds.
+
+To set keys without the settings window, start the app once with `LISTNY_KEY_OPENAI`, `LISTNY_KEY_GROQ`, `LISTNY_KEY_ELEVENLABS` or their `_BACKUP` variants set; it stores them encrypted and exits.
+
+## Contributing
+
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), and [docs/RELEASING.md](docs/RELEASING.md) for how releases are cut.
+
+## What's next
+
+Apple notarization · Homebrew cask · hold-to-talk · streaming transcription · on-device Whisper · Windows and Linux builds
+
+---
+
+MIT licensed. Built by [kaiser-data](https://github.com/kaiser-data). Never commit API keys: Listny keeps them in the keychain, and `.env` files stay out of git.

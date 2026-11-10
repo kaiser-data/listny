@@ -1,0 +1,32 @@
+name: Release
+
+# Push a tag like v0.2.0 to build the macOS app for Apple Silicon and Intel
+# and attach the DMG and zip files to a GitHub release.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Tag must match package.json version
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      - run: npm run check
+      # No signing certificate on the runner, so build/sign.cjs applies an ad-hoc signature.
+      - run: npm run dist:release
+      - name: Checksums
+        run: cd release && shasum -a 256 Listny-*.dmg Listny-*.zip | tee SHA256SUMS.txt
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/Listny-*.dmg release/Listny-*.zip release/SHA256SUMS.txt --title "Listny ${GITHUB_REF_NAME#v}" --generate-notes

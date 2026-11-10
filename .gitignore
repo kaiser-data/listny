@@ -3,3 +3,5 @@ dist
 HANDOFF.md
 graphify-out/
 release
+LAUNCH_PLAN.md
+.env

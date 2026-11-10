@@ -12,13 +12,32 @@ const {
   clipboard,
 } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
 const settings = require('./settings.cjs');
-const { transcribe, cleanup } = require('./transcribe.cjs');
+const { transcribeWithKeys, cleanup } = require('./transcribe.cjs');
 const { insertText } = require('./paste.cjs');
 const { muteSystemAudio, restoreSystemAudio, restoreSystemAudioSync } = require('./audio.cjs');
 
 const DIST = path.join(__dirname, '..', 'dist');
 const PILL_SIZE = { width: 260, height: 64 };
+
+// One line per event in ~/Library/Logs/Listny/main.log, so a failed or stuck dictation can be traced afterwards.
+// Never logs dictated text or key material.
+let logFile = '';
+function log(...parts) {
+  try {
+    if (!logFile) {
+      logFile = path.join(app.getPath('logs'), 'main.log');
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      if (fs.existsSync(logFile) && fs.statSync(logFile).size > 1_000_000) fs.renameSync(logFile, `${logFile}.old`);
+    }
+    fs.appendFileSync(logFile, `${new Date().toISOString()} ${parts.join(' ')}\n`);
+  } catch {
+    // logging must never break dictation
+  }
+}
+process.on('uncaughtException', (err) => log('uncaughtException', err.stack || err.message));
+process.on('unhandledRejection', (err) => log('unhandledRejection', err?.stack || String(err)));
 
 let pill = null;
 let hub = null;
@@ -27,7 +46,12 @@ let state = 'idle'; // idle | recording | processing
 let hotkeyError = '';
 let hotkeyPaused = false; // while the hub captures a new shortcut, the old one must not fire
 
+// True once the pill page has attached its listeners. A 'rec:start' sent earlier would be lost
+// and leave Listny stuck in "recording" with an empty pill.
+let pillReady = false;
+
 function createPill() {
+  pillReady = false;
   pill = new BrowserWindow({
     ...PILL_SIZE,
     show: false,
@@ -41,12 +65,22 @@ function createPill() {
     alwaysOnTop: true,
     // A non-activating panel so the app you're dictating into keeps keyboard focus.
     ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
+    // The pill is hidden most of the time; it must still load and react at full speed.
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
   });
   pill.setAlwaysOnTop(true, 'screen-saver');
   pill.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   pill.setIgnoreMouseEvents(true);
   pill.loadFile(path.join(DIST, 'pill.html'));
+  pill.webContents.on('did-finish-load', () => log('pill loaded'));
+  pill.webContents.on('did-fail-load', (_e, code, desc) => log('pill failed to load', code, desc));
+  pill.webContents.on('render-process-gone', (_e, details) => {
+    log('pill renderer gone', details.reason);
+    setState('idle');
+    pill.destroy();
+    createPill();
+  });
+  pill.webContents.on('console-message', (e) => e.level === 'error' && log('pill console error', e.message));
 }
 
 function showPill() {
@@ -83,7 +117,23 @@ function notify(body) {
   if (Notification.isSupported()) new Notification({ title: 'Listny', body }).show();
 }
 
+// A dictation that never finishes (recorder never started, renderer hung) would leave the hotkey dead,
+// so any non-idle state is forced back to idle after a generous deadline.
+const STUCK_AFTER_MS = { recording: 30 * 60_000, processing: 4 * 60_000 };
+let stuckTimer = null;
+
 function setState(next) {
+  if (state !== next) log('state', state, '->', next);
+  clearTimeout(stuckTimer);
+  if (next !== 'idle') {
+    stuckTimer = setTimeout(() => {
+      log('stuck in', next, '- resetting');
+      if (next === 'recording') pill.webContents.send('rec:cancel');
+      setState('idle');
+      pill.hide();
+      notify('Listny got stuck and was reset. Try the dictation again.');
+    }, STUCK_AFTER_MS[next]);
+  }
   state = next;
   updateTray();
   // Music and videos go quiet while you talk and come back the moment you stop (or cancel).
@@ -96,10 +146,12 @@ function setState(next) {
 }
 
 function toggleRecording() {
+  log('hotkey pressed, state', state, pillReady ? '' : '(pill not ready yet)');
   if (state === 'idle') {
     setState('recording');
     showPill();
-    pill.webContents.send('rec:start');
+    // If the pill page is still loading, 'pill:ready' starts the recording as soon as it can listen.
+    if (pillReady) pill.webContents.send('rec:start');
   } else if (state === 'recording') {
     setState('processing');
     pill.webContents.send('rec:stop');
@@ -125,42 +177,26 @@ function registerHotkey() {
   } catch {
     hotkeyError = `"${hotkey}" is not a valid shortcut.`;
   }
+  log('hotkey', hotkey, hotkeyError ? `NOT registered: ${hotkeyError}` : 'registered');
   if (hotkeyError) notify(hotkeyError);
   updateTray();
 }
 
 // Speech-to-text plus optional cleanup, shared by live dictation and retries of saved recordings.
-// Statuses that mean "this account can't be used right now" (bad key, out of credits, rate limited),
-// where trying the provider's other key can still succeed.
-const KEY_FAILURES = new Set([401, 402, 403, 429]);
-
-async function transcribeWithKeys(provider, request) {
-  const ordered = settings.getKeys(provider); // the key that worked last comes first
-  if (!ordered.length) return transcribe({ ...request, provider, apiKey: '' }); // throws the "no key" message
-  let firstError;
-  for (const { slot, key } of ordered) {
-    try {
-      const raw = await transcribe({ ...request, provider, apiKey: key });
-      settings.preferKey(provider, slot); // persisted, so the next session starts on this key
-      return raw;
-    } catch (err) {
-      firstError ||= err;
-      if (!KEY_FAILURES.has(err.status)) throw err;
-    }
-  }
-  if (ordered.length > 1) firstError.message = `Both ${provider} keys failed. ${firstError.message}`;
-  throw firstError;
-}
-
 async function toText(audio, mimeType) {
   const cfg = settings.load();
   const provider = cfg.stt.provider;
-  const raw = await transcribeWithKeys(provider, {
-    model: cfg.stt.models[provider],
-    audio,
-    mimeType,
-    language: cfg.language,
-  });
+  const raw = await transcribeWithKeys(
+    settings.getKeys(provider), // the key that worked last comes first
+    { provider, model: cfg.stt.models[provider], audio, mimeType, language: cfg.language },
+    {
+      onKeyFailed: (slot, err) => log('transcription failed with key', slot, 'status', err.status || '-', err.message.slice(0, 200)),
+      onKeyWorked: (slot) => {
+        settings.preferKey(provider, slot); // persisted, so the next session starts on this key
+        log('transcribed with key', slot);
+      },
+    }
+  );
   if (!raw || !cfg.cleanup.enabled) return { provider, raw, text: raw };
   const cp = cfg.cleanup.provider;
   const text = await cleanup({ provider: cp, model: cfg.cleanup.models[cp], apiKey: settings.getKey(cp), text: raw });
@@ -176,7 +212,8 @@ async function processAudio(_event, { audio, mimeType, durationMs }) {
     const { provider, raw, text } = await toText(buf, mimeType);
     if (!raw) return { status: 'empty' };
 
-    const result = await insertText(text, { paste: cfg.pasteIntoActiveApp, restoreClipboard: cfg.restoreClipboard });
+    const result = await insertText(text, { paste: cfg.pasteIntoActiveApp, restoreClipboard: cfg.restoreClipboard, log });
+    log('dictation', id, result, `${durationMs}ms audio, ${Date.now() - started}ms to text`);
     if (result === 'copied' && cfg.pasteIntoActiveApp) {
       notify('Copied to clipboard. Allow Listny under Privacy & Security → Accessibility to paste automatically.');
     }
@@ -206,6 +243,7 @@ async function processAudio(_event, { audio, mimeType, durationMs }) {
       durationMs,
     });
     hub?.webContents.send('history:changed');
+    log('dictation', id, 'failed:', err.message.slice(0, 300));
     notify(`${err.message}\nRecording saved — retry it from the Listny history.`);
     return { status: 'error', error: err.message };
   } finally {
@@ -278,12 +316,19 @@ function updateTray() {
 }
 
 ipcMain.handle('audio:process', processAudio);
+ipcMain.on('pill:ready', () => {
+  log('pill ready');
+  pillReady = true;
+  if (state === 'recording') pill.webContents.send('rec:start'); // hotkey was pressed while the pill was loading
+});
 ipcMain.on('rec:failed', (_e, message) => {
+  log('microphone error:', message);
   notify(`Microphone error: ${message}`);
   setState('idle');
   pill.hide();
 });
 ipcMain.on('rec:discard', () => {
+  log('recording discarded (too short or empty)');
   setState('idle');
   pill.hide();
 });
@@ -331,7 +376,11 @@ app.whenReady().then(async () => {
   // Menu-bar only: no Dock icon, so dictating never activates the app or pops a window.
   if (process.platform === 'darwin') app.dock.hide();
   if (importKeysFromEnv()) return app.quit();
-  if (process.platform === 'darwin') await systemPreferences.askForMediaAccess('microphone');
+  log('starting', app.getVersion(), 'mic', systemPreferences.getMediaAccessStatus?.('microphone'), 'accessibility', systemPreferences.isTrustedAccessibilityClient?.(false));
+  if (process.platform === 'darwin') {
+    const granted = await systemPreferences.askForMediaAccess('microphone');
+    log('microphone access', granted ? 'granted' : 'DENIED');
+  }
   createPill();
   tray = new Tray(trayIcon());
   registerHotkey();

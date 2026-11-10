@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="340" viewBox="0 0 1280 340" role="img" aria-labelledby="t">
+  <title id="t">Listny: open-source voice dictation for macOS</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#22242a"/>
+      <stop offset="1" stop-color="#0f1012"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="340" rx="28" fill="url(#bg)"/>
+  <rect x="1" y="1" width="1278" height="338" rx="27" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="2"/>
+  <g transform="translate(60 -14) scale(0.36)">
+      <rect x="417" y="250" width="190" height="330" rx="95" fill="#f4f1ea"/>
+      <path d="M332 480a180 180 0 0 0 360 0M512 660v104M432 770h160" stroke="#f4f1ea" stroke-width="44" fill="none" stroke-linecap="round"/>
+      <circle cx="700" cy="290" r="38" fill="#ff5a4e"/>
+  </g>
+  <text x="370" y="150" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="104" font-weight="700" letter-spacing="-3.1" fill="#f4f1ea">Listny</text>
+  <text x="374" y="207" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="30" fill="#f4f1ea" fill-opacity="0.92">Press a hotkey. Speak. It is typed where your cursor is.</text>
+  <text x="374" y="255" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="22" fill="#9a9ca3">Open-source voice dictation for macOS, with your own speech-to-text key</text>
+</svg>
