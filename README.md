@@ -41,6 +41,16 @@ Listny is the small, inspectable version: a menu-bar app that records while you 
 | Source | Closed | MIT-licensed, about 1,300 lines you can read |
 | Failed dictation | Usually gone | Audio is kept and can be retried from the history |
 
+## What it looks like
+
+<p align="center"><img src="docs/img/pill.png" alt="The recording pill: a level meter, a red recording dot with a timer, and an esc hint" width="260"></p>
+
+| History | Settings |
+| --- | --- |
+| <img src="docs/img/history.png" alt="History window listing dictations with time, provider and latency, and one failed dictation with a Retry button" width="400"> | <img src="docs/img/settings.png" alt="Settings window: shortcut, transcription provider and model, AI cleanup, output options, and API keys with a backup key per provider" width="400"> |
+
+The screenshots show the real interface with demo data ([how they are made](docs/screenshots.py)).
+
 ## What it does
 
 - **Dictate anywhere.** A global hotkey (default **Option+Space**, configurable) starts and stops recording. **Esc** cancels.
@@ -121,7 +131,7 @@ src/
 test/             unit tests for the transcription module
 build/            app icon and the code-signing hook
 packaging/        Homebrew cask template
-docs/             images and the release guide
+docs/             images, the release guide and the screenshot script
 ```
 
 ## Run it from source
