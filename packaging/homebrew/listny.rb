@@ -5,11 +5,11 @@ cask "listny" do
   version "0.2.0"
 
   on_arm do
-    sha256 "REPLACE_WITH_ARM64_DMG_SHA256"
+    sha256 "29af51a1bc84cdbc9e84e85c7609ecfc6a2f689629c468e31d2d51050c6a6273"
     url "https://github.com/kaiser-data/listny/releases/download/v#{version}/Listny-#{version}-arm64.dmg"
   end
   on_intel do
-    sha256 "REPLACE_WITH_X64_DMG_SHA256"
+    sha256 "c20d7726893652254cc3975b82d731e4b8551030af246e0612afb7f6687b59c6"
     url "https://github.com/kaiser-data/listny/releases/download/v#{version}/Listny-#{version}-x64.dmg"
   end
 
