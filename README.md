@@ -22,6 +22,8 @@
 > 2. Listny is not notarized by Apple yet, so the first start needs one extra step: run `xattr -dr com.apple.quarantine /Applications/Listny.app` in Terminal, then open the app.
 > 3. Paste an API key from OpenAI, Groq or ElevenLabs into the settings window that opens. Groq and ElevenLabs have free plans.
 > 4. Click into any text field, press **Option+Space**, speak, press **Option+Space** again.
+>
+> With Homebrew, steps 1 and 2 are one command: `brew install --cask kaiser-data/tap/listny`
 
 <img src="docs/img/how-it-works.svg" alt="Press Option+Space, speak while the recording pill shows a level meter and a timer, press again, and the sentence appears in the text field you were in" width="100%">
 
@@ -147,7 +149,7 @@ Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md
 
 ## What's next
 
-Apple notarization · Homebrew cask · hold-to-talk · streaming transcription · on-device Whisper · Windows and Linux builds
+Apple notarization · hold-to-talk · streaming transcription · on-device Whisper · Windows and Linux builds
 
 ---
 

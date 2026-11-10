@@ -17,10 +17,13 @@ To build the same files locally: `npm run dist:release`.
 
 ## Homebrew
 
-`packaging/homebrew/listny.rb` is a cask template. To offer `brew install --cask kaiser-data/tap/listny`:
+`brew install --cask kaiser-data/tap/listny` installs from the tap repository [kaiser-data/homebrew-tap](https://github.com/kaiser-data/homebrew-tap), file `Casks/listny.rb`. `packaging/homebrew/listny.rb` in this repository is the same cask, kept as the source.
 
-1. Create the repository `kaiser-data/homebrew-tap` and copy the file to `Casks/listny.rb`.
-2. After each release, set `version` and the two `sha256` values from `SHA256SUMS.txt`.
+After each release:
+
+1. Set `version` and the two `sha256` values from `SHA256SUMS.txt` in `packaging/homebrew/listny.rb`.
+2. Copy the file (without its three comment lines at the top) to `Casks/listny.rb` in the tap and push.
+3. Check it with `brew style kaiser-data/tap` and `brew fetch --cask kaiser-data/tap/listny`.
 
 The cask removes the quarantine attribute after install because the app is not notarized. Homebrew's own cask repository no longer accepts apps that fail Gatekeeper, so a tap is the only route until Listny is notarized.
 
