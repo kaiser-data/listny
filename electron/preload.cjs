@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('listny', {
   onCancel: on('rec:cancel'),
   pillReady: () => ipcRenderer.send('pill:ready'),
   processAudio: (payload) => ipcRenderer.invoke('audio:process', payload),
+  transcribePiece: (audio) => ipcRenderer.invoke('audio:piece', audio),
+  getPillSettings: () => ipcRenderer.invoke('pill:settings'),
   recordingFailed: (message) => ipcRenderer.send('rec:failed', message),
   discardRecording: () => ipcRenderer.send('rec:discard'),
   // hub

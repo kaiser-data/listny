@@ -15,11 +15,13 @@ const path = require('node:path');
 const fs = require('node:fs');
 const settings = require('./settings.cjs');
 const { transcribeWithKeys, cleanup } = require('./transcribe.cjs');
-const { insertText } = require('./paste.cjs');
+const { insertText, pasteChunk, canPaste } = require('./paste.cjs');
+const { separator, ending, joinPieces } = require('./pieces.cjs');
 const { muteSystemAudio, restoreSystemAudio, restoreSystemAudioSync } = require('./audio.cjs');
 
 const DIST = path.join(__dirname, '..', 'dist');
-const PILL_SIZE = { width: 260, height: 64 };
+// Room above the pill for the live words (Lyrics); the window is transparent and ignores the mouse.
+const PILL_SIZE = { width: 560, height: 150 };
 
 // One line per event in ~/Library/Logs/Listny/main.log, so a failed or stuck dictation can be traced afterwards.
 // Never logs dictated text or key material.
@@ -148,6 +150,7 @@ function setState(next) {
 function toggleRecording() {
   log('hotkey pressed, state', state, pillReady ? '' : '(pill not ready yet)');
   if (state === 'idle') {
+    live = startLive();
     setState('recording');
     showPill();
     // If the pill page is still loading, 'pill:ready' starts the recording as soon as it can listen.
@@ -160,6 +163,11 @@ function toggleRecording() {
 
 function cancelRecording() {
   if (state !== 'recording') return;
+  if (live) {
+    live.stopped = true; // pieces still in flight are not typed; what is already typed stays
+    const session = live;
+    pieceQueue.then(() => restoreLiveClipboard(session));
+  }
   pill.webContents.send('rec:cancel');
   setState('idle');
   pill.hide();
@@ -182,11 +190,11 @@ function registerHotkey() {
   updateTray();
 }
 
-// Speech-to-text plus optional cleanup, shared by live dictation and retries of saved recordings.
-async function toText(audio, mimeType) {
+// Speech-to-text with the provider's keys, shared by whole recordings, Rests pieces and retries.
+async function speechToText(audio, mimeType) {
   const cfg = settings.load();
   const provider = cfg.stt.provider;
-  const raw = await transcribeWithKeys(
+  return transcribeWithKeys(
     settings.getKeys(provider), // the key that worked last comes first
     { provider, model: cfg.stt.models[provider], audio, mimeType, language: cfg.language },
     {
@@ -197,24 +205,119 @@ async function toText(audio, mimeType) {
       },
     }
   );
+}
+
+// Speech-to-text plus optional cleanup. `transcript` is passed when Rests already transcribed the
+// pieces during the dictation; otherwise the whole recording is sent.
+async function toText(audio, mimeType, transcript) {
+  const cfg = settings.load();
+  const provider = cfg.stt.provider;
+  const raw = transcript || (await speechToText(audio, mimeType));
   if (!raw || !cfg.cleanup.enabled) return { provider, raw, text: raw };
   const cp = cfg.cleanup.provider;
   const text = await cleanup({ provider: cp, model: cfg.cleanup.models[cp], apiKey: settings.getKey(cp), text: raw });
   return { provider, raw, text };
 }
 
-async function processAudio(_event, { audio, mimeType, durationMs }) {
+// Live typing: each Rests piece is pasted into the focused field as soon as it is transcribed.
+// Only when the text is final as transcribed: AI cleanup needs the whole text, so it turns this off.
+let live = null;
+function startLive() {
   const cfg = settings.load();
-  const started = Date.now();
+  if (!cfg.rests || !cfg.livePaste || !cfg.pasteIntoActiveApp || cfg.cleanup.enabled || !canPaste()) return null;
+  return { clipboard: clipboard.readText(), typed: [], last: '', stopped: false, failed: false };
+}
+
+async function typePiece(session, text) {
+  if (!text) return;
+  const chunk = separator(session.last, text) + text;
+  try {
+    await pasteChunk(chunk);
+    session.typed.push(text);
+    session.last = text;
+    session.lastChunk = chunk;
+  } catch (err) {
+    session.failed = true;
+    log('live paste failed:', err.message.slice(0, 200));
+  }
+}
+
+// Ends live typing: closes the last sentence and gives the user their clipboard back.
+async function endLive(session) {
+  const end = ending(session.last);
+  if (end) {
+    try {
+      await pasteChunk(end);
+      session.lastChunk = end;
+    } catch {}
+  }
+  restoreLiveClipboard(session);
+}
+
+// Puts the user's clipboard back once live typing is over (also after Esc or a failure),
+// unless they copied something new in the meantime.
+function restoreLiveClipboard(session) {
+  if (!session?.lastChunk) return;
+  const { lastChunk } = session;
+  setTimeout(() => {
+    if (clipboard.readText() === lastChunk) clipboard.writeText(session.clipboard);
+  }, 1500);
+}
+
+// Rests: one piece of a running dictation, transcribed while the speaker goes on talking.
+// Pieces go one at a time, so a free account's concurrency limit is never hit, and they are typed in order.
+let pieceQueue = Promise.resolve();
+function transcribePiece(_event, audio) {
+  const session = live; // taken when the piece arrives, so a late piece never lands in the next dictation
+  const run = async () => {
+    const started = Date.now();
+    try {
+      const text = await speechToText(Buffer.from(audio), 'audio/wav');
+      log('piece', `${Math.round(audio.byteLength / 32)}ms audio, ${Date.now() - started}ms to text`);
+      if (session && !session.stopped && !session.failed) await typePiece(session, text.trim());
+      return { text };
+    } catch (err) {
+      log('piece failed:', err.message.slice(0, 300));
+      if (session) session.failed = true;
+      return { error: err.message };
+    }
+  };
+  pieceQueue = pieceQueue.then(run);
+  return pieceQueue;
+}
+
+async function processAudio(_event, { audio, mimeType, durationMs, texts, waitedMs = 0 }) {
+  const session = live;
+  live = null;
+  const transcript = texts ? joinPieces(texts) : '';
+  const pieces = texts?.length;
+  const cfg = settings.load();
+  // The wait you notice starts when you stop talking: include the time the pill spent on the last piece.
+  const started = Date.now() - waitedMs;
   const id = started.toString(36);
   const buf = Buffer.from(audio);
   try {
-    const { provider, raw, text } = await toText(buf, mimeType);
+    const { provider, raw, text } = await toText(buf, mimeType, transcript);
     if (!raw) return { status: 'empty' };
 
-    const result = await insertText(text, { paste: cfg.pasteIntoActiveApp, restoreClipboard: cfg.restoreClipboard, log });
-    log('dictation', id, result, `${durationMs}ms audio, ${Date.now() - started}ms to text`);
-    if (result === 'copied' && cfg.pasteIntoActiveApp) {
+    let result;
+    const spoken = texts?.filter((t) => t.trim()).length;
+    if (session?.typed.length && transcript && !session.failed && session.typed.length === spoken) {
+      // Everything was already typed while you talked.
+      await endLive(session);
+      result = 'pasted';
+    } else if (session?.typed.length) {
+      // Part of it was typed before a piece failed; typing the rest could duplicate or garble it,
+      // so the complete text goes to the clipboard instead.
+      clipboard.writeText(text);
+      notify('Part of the dictation could not be typed live. The complete text is on your clipboard.');
+      result = 'copied';
+    } else {
+      result = await insertText(text, { paste: cfg.pasteIntoActiveApp, restoreClipboard: cfg.restoreClipboard, log });
+    }
+    const how = transcript ? `${pieces} pieces (Rests${session?.typed.length ? ', typed live' : ''})` : 'whole recording';
+    log('dictation', id, result, `${durationMs}ms audio, ${Date.now() - started}ms to text, ${how}`);
+    if (result === 'copied' && cfg.pasteIntoActiveApp && !session?.typed.length) {
       notify('Copied to clipboard. Allow Listny under Privacy & Security → Accessibility to paste automatically.');
     }
     settings.addHistory({
@@ -243,6 +346,7 @@ async function processAudio(_event, { audio, mimeType, durationMs }) {
       durationMs,
     });
     hub?.webContents.send('history:changed');
+    restoreLiveClipboard(session);
     log('dictation', id, 'failed:', err.message.slice(0, 300));
     notify(`${err.message}\nRecording saved — retry it from the Listny history.`);
     return { status: 'error', error: err.message };
@@ -316,6 +420,8 @@ function updateTray() {
 }
 
 ipcMain.handle('audio:process', processAudio);
+ipcMain.handle('audio:piece', transcribePiece);
+ipcMain.handle('pill:settings', () => ({ rests: settings.load().rests }));
 ipcMain.on('pill:ready', () => {
   log('pill ready');
   pillReady = true;

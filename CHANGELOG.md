@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Rests & Lyrics** (on by default): the dictation is cut at your pauses and each piece is transcribed while you keep talking. The text so far shows above the pill, the wait after stopping no longer grows with the length of the dictation, and long pauses are not uploaded. Falls back to the whole recording if any piece fails.
+- **Live typing:** with Rests on, each piece is typed into the focused text field as soon as it is transcribed, and your clipboard is restored afterwards.
+
 ## 0.2.0 (2026-11-10)
 
 - Backup API key per provider. When the main key is out of credits or rejected, the dictation is retried with the backup key, and the key that worked is remembered across restarts.

@@ -24,6 +24,10 @@ const DEFAULTS = {
   pasteIntoActiveApp: true,
   restoreClipboard: true,
   muteWhileDictating: true,
+  // Rests & Lyrics: transcribe at the speaker's pauses while they talk and show the words live.
+  rests: true,
+  // Type each piece into the focused field as soon as it is transcribed (off while AI cleanup is on).
+  livePaste: true,
   launchAtLogin: false,
 };
 

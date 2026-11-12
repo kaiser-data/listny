@@ -43,7 +43,7 @@ async function transcribe({ provider, model, apiKey, audio, mimeType, language }
 
   // Anything but a language code (e.g. "Auto-Detect" typed into the field) means auto-detect.
   if (!/^[a-z]{2,3}$/i.test(language || '')) language = '';
-  const ext = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+  const ext = mimeType.includes('wav') ? 'wav' : mimeType.includes('mp4') ? 'm4a' : mimeType.includes('ogg') ? 'ogg' : 'webm';
   const form = new FormData();
   form.append('file', new Blob([audio], { type: mimeType }), `dictation.${ext}`);
   if (provider === 'elevenlabs') {

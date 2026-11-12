@@ -72,4 +72,13 @@ async function insertText(text, { paste = true, restoreClipboard = true, log = (
   return 'pasted';
 }
 
-module.exports = { insertText };
+// Live typing (Rests): pastes one piece into the focused field during a dictation. The caller saves
+// the user's clipboard once before the first piece and restores it after the last.
+async function pasteChunk(text) {
+  clipboard.writeText(text);
+  const method = await sendPasteKeystroke();
+  await new Promise((r) => setTimeout(r, 150)); // let the target app read the clipboard before it changes again
+  return method;
+}
+
+module.exports = { insertText, pasteChunk, canPaste };

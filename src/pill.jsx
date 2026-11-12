@@ -1,26 +1,38 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
+import { createResampler, createSegmenter, encodeWav, joinPieces } from './rests.mjs';
 
 const BARS = 14;
 const MIN_DURATION_MS = 300;
 const MIME = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+const LYRICS_CHARS = 140; // about two lines of the live text
+
+// The end of the live text, cut at a word so it never starts mid-word.
+function tail(text) {
+  if (text.length <= LYRICS_CHARS) return text;
+  const cut = text.slice(-LYRICS_CHARS);
+  return '… ' + cut.slice(cut.indexOf(' ') + 1);
+}
 
 function Pill() {
   const [phase, setPhase] = useState('idle'); // idle | recording | processing | done | error
   const [message, setMessage] = useState('');
   const [seconds, setSeconds] = useState(0);
+  const [lyrics, setLyrics] = useState('');
   const session = useRef(null);
   // The level meter is written straight to the DOM: re-rendering React 60×/s just to move bars is wasted work.
   const bars = useRef([]);
 
   useEffect(() => {
     async function start() {
-      const s = { chunks: [], cancelled: false, stopRequested: false, startedAt: Date.now() };
+      const s = { chunks: [], pieces: [], texts: [], cancelled: false, stopRequested: false, startedAt: Date.now() };
       session.current = s;
       setPhase('recording');
       setMessage('');
+      setLyrics('');
       setSeconds(0);
+      const { rests } = await window.listny.getPillSettings();
       s.timer = setInterval(() => setSeconds(Math.floor((Date.now() - s.startedAt) / 1000)), 1000);
       try {
         s.stream = await navigator.mediaDevices.getUserMedia({
@@ -45,12 +57,47 @@ function Pill() {
         s.raf = requestAnimationFrame(tick);
       };
       tick();
+      if (rests) startRests(s, analyser.context);
 
       s.recorder = new MediaRecorder(s.stream, { mimeType: MIME });
       s.recorder.ondataavailable = (e) => e.data.size && s.chunks.push(e.data);
       s.recorder.onstop = () => finish(s);
       s.recorder.start(250);
       if (s.stopRequested || s.cancelled) s.recorder.stop();
+    }
+
+    // Rests: the same microphone audio, cut at pauses; each piece is transcribed while you keep talking
+    // and its text appears in the pill (Lyrics). The whole recording is still kept as a fallback.
+    function startRests(s, ctx) {
+      const resample = createResampler(ctx.sampleRate);
+      s.segmenter = createSegmenter((samples) => {
+        const index = s.pieces.length;
+        const piece = window.listny.transcribePiece(encodeWav(samples)).then((res) => {
+          if (res.error) return Promise.reject(new Error(res.error));
+          s.texts[index] = res.text;
+          if (!s.cancelled) setLyrics(tail(joinPieces(s.texts.filter((t) => t !== undefined))));
+          return res.text;
+        });
+        piece.catch(() => {}); // a failed piece only means the whole recording is sent at the end
+        s.pieces.push(piece);
+      });
+      // ScriptProcessorNode is deprecated but needs no separate module file, which the pill's CSP would block.
+      s.tap = ctx.createScriptProcessor(4096, 1, 1);
+      s.tap.onaudioprocess = (e) => s.segmenter.push(resample(e.inputBuffer.getChannelData(0)));
+      ctx.createMediaStreamSource(s.stream).connect(s.tap);
+      s.tap.connect(ctx.destination); // a processor only runs while connected; its output stays silent
+    }
+
+    // The pieces' texts, or null when Rests was off or any piece failed (then the whole recording is sent).
+    async function restsTranscript(s) {
+      if (!s.segmenter) return null;
+      s.tap.onaudioprocess = null;
+      s.segmenter.flush();
+      try {
+        return { texts: await Promise.all(s.pieces) };
+      } catch {
+        return null;
+      }
     }
 
     function release(s) {
@@ -61,8 +108,11 @@ function Pill() {
     }
 
     async function finish(s) {
+      const stoppedAt = Date.now();
+      const durationMs = stoppedAt - s.startedAt;
+      // Takes the last audio still in the processor before the microphone is released.
+      const rests = s.cancelled ? null : restsTranscript(s);
       release(s);
-      const durationMs = Date.now() - s.startedAt;
       if (s.cancelled) return setPhase('idle');
       if (durationMs < MIN_DURATION_MS || !s.chunks.length) {
         window.listny.discardRecording();
@@ -70,7 +120,10 @@ function Pill() {
       }
       setPhase('processing');
       const audio = await new Blob(s.chunks, { type: MIME }).arrayBuffer();
-      const res = await window.listny.processAudio({ audio, mimeType: MIME, durationMs });
+      const restsResult = await rests;
+      // Nothing heard by the pause detector (very quiet speech?) also falls back to the whole recording.
+      const fromPieces = restsResult && joinPieces(restsResult.texts) ? restsResult : {};
+      const res = await window.listny.processAudio({ audio, mimeType: MIME, durationMs, waitedMs: Date.now() - stoppedAt, ...fromPieces });
       if (res.status === 'error') {
         setPhase('error');
         setMessage('Failed — see notification');
@@ -100,7 +153,10 @@ function Pill() {
     return () => offs.forEach((off) => off());
   }, []);
 
+  const showLyrics = lyrics && (phase === 'recording' || phase === 'processing');
   return (
+    <>
+    {showLyrics && <div className="lyrics">{lyrics}</div>}
     <div className={`pill pill--${phase}`}>
       {phase === 'recording' && (
         <>
@@ -125,6 +181,7 @@ function Pill() {
       )}
       {(phase === 'done' || phase === 'error') && <div className="pill-msg">{message}</div>}
     </div>
+    </>
   );
 }
 

@@ -65,6 +65,7 @@ The screenshots show the real interface with demo data ([how they are made](docs
 
 - **Backup key.** Add a second key per provider, for example a second account. When the first is out of credits or rejected, the same dictation is retried with the backup, and Listny remembers which key worked.
 - **Optional AI cleanup.** An OpenAI or Groq chat model removes filler words, applies spoken corrections (*"at 3, no wait, at 4"*) and fixes punctuation.
+- **Rests & Lyrics.** Listny cuts your dictation at your pauses and transcribes each piece while you keep talking. The words so far appear above the pill, the text is ready about a second after you stop, however long you talked, and long pauses are never uploaded, so they cost nothing. Each piece is also typed straight into the field your cursor is in, so you watch your text grow while you talk (off while AI cleanup is on, which needs the whole text). Esc stops typing; what is already typed stays. If a piece fails, the whole recording is transcribed and the complete text goes to your clipboard. Turn Rests off in the settings to send one recording per dictation.
 - **Quiet while you talk.** Music and videos are muted during a dictation and come back when you stop. If sound was already off, Listny leaves it off.
 - **Nothing gets lost.** Every dictation is in the history. If transcription fails, the audio is saved and can be retried.
 - **Any language** your provider supports. Leave the language field empty to auto-detect, or set a code such as `de`.
@@ -99,7 +100,7 @@ One measured data point: ElevenLabs charged about 1.1 credits per second of audi
 - **Not notarized.** The app is signed ad hoc, so macOS needs the `xattr` step above, and it may ask for Microphone and Accessibility permission again after an update.
 - **The Intel build is untested.** It is built by CI; development happens on Apple Silicon.
 - **Toggle, not hold-to-talk.** Electron's global shortcuts cannot see a key release.
-- **No streaming.** Audio is uploaded when you stop, so text appears a second or two later.
+- **Live text comes per phrase, not per word.** Lyrics shows a phrase once you pause after it. Each piece is transcribed without the others as context, so a word at the start of a piece is now and then recognised differently than in one long recording.
 - **Cloud only.** There is no on-device model yet.
 
 ## Stack

@@ -156,6 +156,22 @@ function Settings({ settings, setSettings }) {
           <input type="checkbox" checked={settings.muteWhileDictating} onChange={(e) => save({ muteWhileDictating: e.target.checked })} />
           Mute music and videos while I talk, turn sound back on when I stop
         </label>
+        <label className="toggle">
+          <input type="checkbox" checked={settings.rests} onChange={(e) => save({ rests: e.target.checked })} />
+          <span>
+            <strong>Rests &amp; Lyrics:</strong> transcribe at my pauses while I talk and show the words above the pill.
+            Long pauses aren't uploaded, so they cost nothing, and the text is ready right after I stop.
+          </span>
+        </label>
+        {settings.rests && (
+          <label className="toggle">
+            <input type="checkbox" checked={settings.livePaste} disabled={settings.cleanup.enabled} onChange={(e) => save({ livePaste: e.target.checked })} />
+            <span>
+              Type the words into the text field as I talk
+              {settings.cleanup.enabled && <span className="muted"> (off while AI cleanup is on, which needs the whole text)</span>}
+            </span>
+          </label>
+        )}
         {settings.canLaunchAtLogin && (
           <label className="toggle">
             <input type="checkbox" checked={settings.launchAtLogin} onChange={(e) => save({ launchAtLogin: e.target.checked })} />
