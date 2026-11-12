@@ -80,14 +80,36 @@ function load() {
 }
 
 // API keys are encrypted with the OS keychain via safeStorage and never sent to a renderer.
+// Decrypted keys, kept in memory. The first keychain access after launch can take 10 s or more,
+// and the synchronous call blocks the whole main process (no pill, dead hotkey) for that long,
+// so keys are decrypted asynchronously at startup (loadKeys) and read from here afterwards.
+const plain = new Map();
+
+let loading = null;
+const loadKeys = () => (loading ||= decryptAll());
+async function decryptAll() {
+  for (const [slot, enc] of Object.entries(load().keys)) {
+    if (plain.has(slot)) continue;
+    try {
+      plain.set(slot, (await safeStorage.decryptStringAsync(Buffer.from(enc, 'base64'))).result);
+    } catch {
+      plain.set(slot, '');
+    }
+  }
+}
+
+const hasStoredKey = () => Object.keys(load().keys).length > 0;
+
 function readSlot(slot) {
+  if (plain.has(slot)) return plain.get(slot);
   const enc = load().keys[slot];
   if (!enc) return '';
   try {
-    return safeStorage.decryptString(Buffer.from(enc, 'base64'));
+    plain.set(slot, safeStorage.decryptString(Buffer.from(enc, 'base64'))); // only before loadKeys is done
   } catch {
-    return '';
+    plain.set(slot, '');
   }
+  return plain.get(slot);
 }
 
 // All usable keys for a provider as { slot, key }. The slot that worked last comes first and is
@@ -120,6 +142,7 @@ function setKey(slot, value) {
     }
   } else delete keys[slot];
   write(file(), { ...raw, keys });
+  plain.set(slot, value || '');
 }
 
 // The shape a renderer sees: settings without key material, plus which keys are usable.
@@ -173,6 +196,8 @@ const deleteRecording = (name) => fs.rmSync(path.join(recordingsDir(), path.base
 
 module.exports = {
   load,
+  loadKeys,
+  hasStoredKey,
   save,
   getKey,
   getKeys,

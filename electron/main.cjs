@@ -192,6 +192,7 @@ function registerHotkey() {
 
 // Speech-to-text with the provider's keys, shared by whole recordings, Rests pieces and retries.
 async function speechToText(audio, mimeType) {
+  await settings.loadKeys(); // right after launch, wait for the background decryption instead of blocking
   const cfg = settings.load();
   const provider = cfg.stt.provider;
   return transcribeWithKeys(
@@ -232,7 +233,9 @@ async function typePiece(session, text) {
   if (!text) return;
   const chunk = separator(session.last, text) + text;
   try {
+    const t = Date.now();
     await pasteChunk(chunk);
+    log('typed piece live in', `${Date.now() - t}ms`);
     session.typed.push(text);
     session.last = text;
     session.lastChunk = chunk;
@@ -487,12 +490,17 @@ app.whenReady().then(async () => {
     const granted = await systemPreferences.askForMediaAccess('microphone');
     log('microphone access', granted ? 'granted' : 'DENIED');
   }
+  const t0 = Date.now();
+  const step = (name) => log('startup', name, `${Date.now() - t0}ms`);
   createPill();
+  step('pill created');
   tray = new Tray(trayIcon());
   registerHotkey();
   applyLoginItem();
-  const firstRun = !Object.values(settings.publicSettings().hasKey).some(Boolean);
-  if (firstRun) openHub();
+  step('login item');
+  // Only checks that keys are stored; decrypting them happens in the background.
+  if (!settings.hasStoredKey()) openHub();
+  settings.loadKeys().then(() => step('keys decrypted'));
 });
 
 app.on('window-all-closed', () => {}); // stay alive in the menu bar
