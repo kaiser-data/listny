@@ -17,6 +17,8 @@ const settings = require('./settings.cjs');
 const { transcribeWithKeys, cleanup } = require('./transcribe.cjs');
 const { insertText, pasteChunk, canPaste } = require('./paste.cjs');
 const { separator, ending, joinPieces } = require('./pieces.cjs');
+const { createTyper } = require('./typer.cjs');
+const { openStream } = require('./stream.cjs');
 const { muteSystemAudio, restoreSystemAudio, restoreSystemAudioSync } = require('./audio.cjs');
 
 const DIST = path.join(__dirname, '..', 'dist');
@@ -166,7 +168,9 @@ function cancelRecording() {
   if (live) {
     live.stopped = true; // pieces still in flight are not typed; what is already typed stays
     const session = live;
-    pieceQueue.then(() => restoreLiveClipboard(session));
+    live = null;
+    session.stream?.cancel();
+    Promise.all([pieceQueue, session.typing]).then(() => closeLive(session));
   }
   pill.webContents.send('rec:cancel');
   setState('idle');
@@ -220,13 +224,49 @@ async function toText(audio, mimeType, transcript) {
   return { provider, raw, text };
 }
 
-// Live typing: each Rests piece is pasted into the focused field as soon as it is transcribed.
-// Only when the text is final as transcribed: AI cleanup needs the whole text, so it turns this off.
+// A dictation with Rests on. With ElevenLabs it streams: words arrive while they are spoken and
+// each finished stretch is typed; other providers get the pause-cut pieces. Live typing needs the
+// text to be final as transcribed, so AI cleanup (which needs the whole text) turns it off.
 let live = null;
 function startLive() {
   const cfg = settings.load();
-  if (!cfg.rests || !cfg.livePaste || !cfg.pasteIntoActiveApp || cfg.cleanup.enabled || !canPaste()) return null;
-  return { clipboard: clipboard.readText(), typed: [], last: '', stopped: false, failed: false };
+  if (!cfg.rests) return null;
+  const session = { clipboard: clipboard.readText(), typed: [], last: '', stopped: false, failed: false, typing: Promise.resolve() };
+  session.typeLive = cfg.livePaste && cfg.pasteIntoActiveApp && !cfg.cleanup.enabled && canPaste();
+  // Words are typed as keystrokes where possible (flowing text, clipboard untouched); pasting is the fallback.
+  if (session.typeLive && process.platform === 'darwin') {
+    session.typer = createTyper({ log });
+    session.typer.ready.catch((err) => log('typer unavailable, pasting instead:', err.message));
+  }
+  if (cfg.stt.provider === 'elevenlabs') {
+    session.stream = openStream({
+      keys: settings.loadKeys().then(() => settings.getKeys('elevenlabs')),
+      model: cfg.stt.liveModel,
+      language: cfg.language,
+      log,
+      keyHooks: { onKeyWorked: (slot) => settings.preferKey('elevenlabs', slot) },
+      onPartial: (text) => !session.stopped && pill.webContents.send('live:partial', text),
+      onCommitted: (text) => {
+        if (session.stopped) return;
+        pill.webContents.send('live:committed', text);
+        if (session.typeLive) session.typing = session.typing.then(() => !session.failed && !session.stopped && typePiece(session, text));
+      },
+    });
+  }
+  return session;
+}
+
+async function typeText(session, chunk) {
+  if (session.typer) {
+    try {
+      await session.typer.ready;
+    } catch {
+      session.typer = null; // not allowed to type: paste instead
+    }
+  }
+  if (session.typer) return session.typer.type(chunk);
+  await pasteChunk(chunk);
+  session.lastChunk = chunk; // only pasting touches the clipboard
 }
 
 async function typePiece(session, text) {
@@ -234,11 +274,10 @@ async function typePiece(session, text) {
   const chunk = separator(session.last, text) + text;
   try {
     const t = Date.now();
-    await pasteChunk(chunk);
-    log('typed piece live in', `${Date.now() - t}ms`);
+    await typeText(session, chunk);
+    log('typed live in', `${Date.now() - t}ms`, session.typer ? 'as keystrokes' : 'by pasting');
     session.typed.push(text);
     session.last = text;
-    session.lastChunk = chunk;
   } catch (err) {
     session.failed = true;
     log('live paste failed:', err.message.slice(0, 200));
@@ -248,12 +287,13 @@ async function typePiece(session, text) {
 // Ends live typing: closes the last sentence and gives the user their clipboard back.
 async function endLive(session) {
   const end = ending(session.last);
-  if (end) {
-    try {
-      await pasteChunk(end);
-      session.lastChunk = end;
-    } catch {}
-  }
+  if (end) await typeText(session, end).catch(() => {});
+  closeLive(session);
+}
+
+function closeLive(session) {
+  if (!session) return;
+  session.typer?.close();
   restoreLiveClipboard(session);
 }
 
@@ -277,7 +317,7 @@ function transcribePiece(_event, audio) {
     try {
       const text = await speechToText(Buffer.from(audio), 'audio/wav');
       log('piece', `${Math.round(audio.byteLength / 32)}ms audio, ${Date.now() - started}ms to text`);
-      if (session && !session.stopped && !session.failed) await typePiece(session, text.trim());
+      if (session?.typeLive && !session.stopped && !session.failed) await typePiece(session, text.trim());
       return { text };
     } catch (err) {
       log('piece failed:', err.message.slice(0, 300));
@@ -292,6 +332,16 @@ function transcribePiece(_event, audio) {
 async function processAudio(_event, { audio, mimeType, durationMs, texts, waitedMs = 0 }) {
   const session = live;
   live = null;
+  if (session?.stream) {
+    // Streaming: finalize the last words and wait until everything committed has been typed.
+    try {
+      texts = await session.stream.finish();
+      await session.typing;
+    } catch {
+      texts = undefined; // the whole recording is transcribed instead
+      session.failed = true;
+    }
+  }
   const transcript = texts ? joinPieces(texts) : '';
   const pieces = texts?.length;
   const cfg = settings.load();
@@ -310,15 +360,18 @@ async function processAudio(_event, { audio, mimeType, durationMs, texts, waited
       await endLive(session);
       result = 'pasted';
     } else if (session?.typed.length) {
+      closeLive(session);
       // Part of it was typed before a piece failed; typing the rest could duplicate or garble it,
       // so the complete text goes to the clipboard instead.
       clipboard.writeText(text);
       notify('Part of the dictation could not be typed live. The complete text is on your clipboard.');
       result = 'copied';
     } else {
+      closeLive(session);
       result = await insertText(text, { paste: cfg.pasteIntoActiveApp, restoreClipboard: cfg.restoreClipboard, log });
     }
-    const how = transcript ? `${pieces} pieces (Rests${session?.typed.length ? ', typed live' : ''})` : 'whole recording';
+    const kind = session?.stream ? 'streamed' : 'Rests';
+    const how = transcript ? `${pieces} ${session?.stream ? 'commits' : 'pieces'} (${kind}${session?.typed.length ? ', typed live' : ''})` : 'whole recording';
     log('dictation', id, result, `${durationMs}ms audio, ${Date.now() - started}ms to text, ${how}`);
     if (result === 'copied' && cfg.pasteIntoActiveApp && !session?.typed.length) {
       notify('Copied to clipboard. Allow Listny under Privacy & Security → Accessibility to paste automatically.');
@@ -349,7 +402,7 @@ async function processAudio(_event, { audio, mimeType, durationMs, texts, waited
       durationMs,
     });
     hub?.webContents.send('history:changed');
-    restoreLiveClipboard(session);
+    closeLive(session);
     log('dictation', id, 'failed:', err.message.slice(0, 300));
     notify(`${err.message}\nRecording saved — retry it from the Listny history.`);
     return { status: 'error', error: err.message };
@@ -424,7 +477,12 @@ function updateTray() {
 
 ipcMain.handle('audio:process', processAudio);
 ipcMain.handle('audio:piece', transcribePiece);
-ipcMain.handle('pill:settings', () => ({ rests: settings.load().rests }));
+ipcMain.handle('pill:settings', () => {
+  const { rests } = settings.load();
+  return { rests, stream: Boolean(live?.stream) };
+});
+ipcMain.on('rec:mic-live', (_e, t) => log('mic live after', `${t.liveMs}ms`, `(microphone opened in ${t.getUserMediaMs}ms)`));
+ipcMain.on('rec:pcm', (_e, pcm) => live?.stream?.send(pcm));
 ipcMain.on('pill:ready', () => {
   log('pill ready');
   pillReady = true;

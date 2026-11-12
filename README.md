@@ -65,7 +65,8 @@ The screenshots show the real interface with demo data ([how they are made](docs
 
 - **Backup key.** Add a second key per provider, for example a second account. When the first is out of credits or rejected, the same dictation is retried with the backup, and Listny remembers which key worked.
 - **Optional AI cleanup.** An OpenAI or Groq chat model removes filler words, applies spoken corrections (*"at 3, no wait, at 4"*) and fixes punctuation.
-- **Rests & Lyrics.** Listny cuts your dictation at your pauses and transcribes each piece while you keep talking. The words so far appear above the pill, the text is ready about a second after you stop, however long you talked, and long pauses are never uploaded, so they cost nothing. Each piece is also typed straight into the field your cursor is in, so you watch your text grow while you talk (off while AI cleanup is on, which needs the whole text). Esc stops typing; what is already typed stays. If a piece fails, the whole recording is transcribed and the complete text goes to your clipboard. Turn Rests off in the settings to send one recording per dictation.
+- **Live dictation with ElevenLabs.** With ElevenLabs as provider, Listny streams your voice to its realtime model (`scribe_v3_live`). Words appear above the pill as you say them (grey while still a guess, white once final), and at every pause the finished sentence is typed into the field your cursor is in, as keystrokes, so your clipboard is never touched (typing waits for the end while AI cleanup is on, which needs the whole text). When you stop, the text is usually already there. The dot in the pill stays grey until the microphone delivers sound and turns red when it is listening: start talking when it is red. If the live connection fails, the whole recording is transcribed instead.
+- **Rests & Lyrics.** With OpenAI or Groq, Listny cuts your dictation at your pauses and transcribes each piece while you keep talking. The words so far appear above the pill, the text is ready about a second after you stop, however long you talked, and long pauses are never uploaded, so they cost nothing. Each piece is also typed straight into the field your cursor is in, so you watch your text grow while you talk (off while AI cleanup is on, which needs the whole text). Esc stops typing; what is already typed stays. If a piece fails, the whole recording is transcribed and the complete text goes to your clipboard. Turn Rests off in the settings to send one recording per dictation.
 - **Quiet while you talk.** Music and videos are muted during a dictation and come back when you stop. If sound was already off, Listny leaves it off.
 - **Nothing gets lost.** Every dictation is in the history. If transcription fails, the audio is saved and can be retried.
 - **Any language** your provider supports. Leave the language field empty to auto-detect, or set a code such as `de`.
@@ -81,7 +82,7 @@ macOS asks for two permissions on first use:
 
 ## Privacy
 
-- **Audio** goes from your Mac to the provider you picked, over HTTPS, and nowhere else. There is no Listny server.
+- **Audio** goes from your Mac to the provider you picked, over encrypted connections (HTTPS, or a secure WebSocket for live dictation), and nowhere else. There is no Listny server.
 - **API keys** are encrypted with the macOS keychain (Electron `safeStorage`) and never leave the main process.
 - **History** (your transcripts) is stored as plain JSON on your Mac in `~/Library/Application Support/listny/`, readable only by your user. Clear it in the history tab.
 - **Failed recordings** are kept in the same folder until you retry or clear them.
@@ -100,7 +101,9 @@ One measured data point: ElevenLabs charged about 1.1 credits per second of audi
 - **Not notarized.** The app is signed ad hoc, so macOS needs the `xattr` step above, and it may ask for Microphone and Accessibility permission again after an update.
 - **The Intel build is untested.** It is built by CI; development happens on Apple Silicon.
 - **Toggle, not hold-to-talk.** Electron's global shortcuts cannot see a key release.
-- **Live text comes per phrase, not per word.** Lyrics shows a phrase once you pause after it. Each piece is transcribed without the others as context, so a word at the start of a piece is now and then recognised differently than in one long recording.
+- **Live dictation bills pauses.** The realtime stream is billed for its whole length, silences included (ElevenLabs lists $0.22 per hour against $0.20 for normal transcription). Turn Rests off to send one recording instead.
+- **Grey words can be wrong.** The words shown while you speak are guesses and are replaced by the final text; once, the first guess came out in another script. Only final text is typed. Setting a language code helps.
+- **With OpenAI and Groq, live text comes per phrase, not per word.** Lyrics shows a phrase once you pause after it. Each piece is transcribed without the others as context, so a word at the start of a piece is now and then recognised differently than in one long recording.
 - **Cloud only.** There is no on-device model yet.
 
 ## Stack
@@ -123,11 +126,15 @@ electron/
   main.cjs        tray, hotkey, recording pill window, the dictation pipeline, log
   transcribe.cjs  provider calls, backup-key fallback, cleanup prompt
   paste.cjs       clipboard + ⌘V, then restores the previous clipboard
+  stream.cjs      live ElevenLabs transcription over a WebSocket
+  typer.cjs       types text into the focused app as keystrokes
+  pieces.cjs      joins transcribed pieces into sentences
   audio.cjs       mutes system output during dictation and restores it
   settings.cjs    settings, history, saved recordings, encrypted keys
   preload.cjs     the narrow bridge between windows and the main process
 src/
-  pill.jsx        records the microphone (WebM/Opus) and draws the level meter
+  pill.jsx        records the microphone, streams or cuts it at pauses, shows the live words
+  rests.mjs       pause detection, resampling and WAV encoding
   hub.jsx         history and settings
 test/             unit tests for the transcription module
 build/            app icon and the code-signing hook
@@ -160,7 +167,7 @@ Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md
 
 ## What's next
 
-Apple notarization · hold-to-talk · streaming transcription · on-device Whisper · Windows and Linux builds
+Apple notarization · hold-to-talk · live streaming for OpenAI and Groq · on-device Whisper · Windows and Linux builds
 
 ---
 

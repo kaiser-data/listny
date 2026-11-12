@@ -7,7 +7,7 @@
     "build": "vite build",
     "start": "vite build && electron .",
     "test": "node --test test/*.test.cjs",
-    "check": "node --check electron/main.cjs && node --check electron/preload.cjs && node --check electron/settings.cjs && node --check electron/transcribe.cjs && node --check electron/paste.cjs && node --check electron/audio.cjs && node --check electron/pieces.cjs && node --test test/*.test.cjs && vite build",
+    "check": "node --check electron/main.cjs && node --check electron/preload.cjs && node --check electron/settings.cjs && node --check electron/transcribe.cjs && node --check electron/paste.cjs && node --check electron/audio.cjs && node --check electron/pieces.cjs && node --check electron/typer.cjs && node --check electron/stream.cjs && node --test test/*.test.cjs && vite build",
     "dist": "vite build && electron-builder --mac",
     "dist:release": "vite build && electron-builder --mac --arm64 --x64 --publish never"
   },

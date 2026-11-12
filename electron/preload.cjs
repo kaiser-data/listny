@@ -6,6 +6,12 @@ const on = (channel) => (fn) => {
   return () => ipcRenderer.removeListener(channel, listener);
 };
 
+const onText = (channel) => (fn) => {
+  const listener = (_e, text) => fn(text);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+};
+
 contextBridge.exposeInMainWorld('listny', {
   // pill
   onStart: on('rec:start'),
@@ -15,6 +21,10 @@ contextBridge.exposeInMainWorld('listny', {
   processAudio: (payload) => ipcRenderer.invoke('audio:process', payload),
   transcribePiece: (audio) => ipcRenderer.invoke('audio:piece', audio),
   getPillSettings: () => ipcRenderer.invoke('pill:settings'),
+  sendPcm: (pcm) => ipcRenderer.send('rec:pcm', pcm),
+  micLive: (timing) => ipcRenderer.send('rec:mic-live', timing),
+  onPartial: onText('live:partial'),
+  onCommitted: onText('live:committed'),
   recordingFailed: (message) => ipcRenderer.send('rec:failed', message),
   discardRecording: () => ipcRenderer.send('rec:discard'),
   // hub

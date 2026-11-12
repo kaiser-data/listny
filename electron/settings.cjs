@@ -12,6 +12,8 @@ const DEFAULTS = {
       groq: 'whisper-large-v3-turbo',
       elevenlabs: 'scribe_v1',
     },
+    // Live word-by-word model, used with ElevenLabs while Rests is on.
+    liveModel: 'scribe_v3_live',
   },
   cleanup: {
     enabled: false,
